@@ -3,13 +3,11 @@
 
 importScripts('sodium.js'); // Load sodium.js
 
-let sodiumInstanceInternal = null;
+let sodiumInstance = null;
 
-const sodiumReadyPromiseInternal = (async () => {
+const sodiumReadyPromise = (async () => {
     if (typeof sodium === 'undefined' || typeof sodium.ready !== 'object') {
         // Fallback: wait for global sodium to be defined by importScripts
-        // This might happen if importScripts is not fully synchronous in all worker contexts
-        // or if sodium.js itself has async parts before 'sodium.ready' is available.
         await new Promise((resolveLoop, rejectLoop) => {
             let checks = 0;
             const interval = setInterval(() => {
@@ -24,15 +22,15 @@ const sodiumReadyPromiseInternal = (async () => {
         });
     }
     await sodium.ready;
-    sodiumInstanceInternal = sodium; // Assign to the module-scoped variable
+    sodiumInstance = sodium; // Assign to the module-scoped variable
     console.log("Sodium is ready in worker.");
     self.postMessage({ status: 'success', action: 'worker_init_sodium_ready' });
-    return sodiumInstanceInternal;
+    return sodiumInstance;
 })().catch(e => {
     console.error("Sodium.js initialization failed in worker:", e);
     self.postMessage({ status: 'error', action: 'worker_init_sodium_failed', error: "Failed to initialize sodium.js. Crypto functions may fail." });
-    sodiumInstanceInternal = null;
-    throw e;
+    sodiumInstance = null;
+    throw e; // Propagate the error so the promise is rejected
 });
 
 
@@ -70,6 +68,7 @@ async function pbkdf2DeriveBaseKeyForHkdf(passwordBytes, saltBytes, iterations, 
         false,
         ["deriveKey", "deriveBits"]
     );
+    // Securely clear sensitive data
     if (derivedBits instanceof ArrayBuffer) {
         new Uint8Array(derivedBits).fill(0);
     }
@@ -86,6 +85,7 @@ async function hkdfDeriveKeyAndIv(baseHkdfKey, saltBytes, infoBytes, keyLen, ivL
     const derivedBytes = new Uint8Array(derivedBytesArrayBuffer);
     const key = derivedBytes.slice(0, keyLen);
     const iv = derivedBytes.slice(keyLen, totalLengthBytes);
+    // Securely clear sensitive data
     derivedBytes.fill(0);
     return { key, iv };
 }
@@ -116,12 +116,12 @@ async function aesGcmLayerDecrypt(dataWithIvAndTag, keyBytes) {
 }
 
 async function chacha20Poly1305LayerEncrypt(plaintextUint8Array, keyBytes, ivBytes) {
-    const sodium = await sodiumReadyPromiseInternal;
+    const sodium = await sodiumReadyPromise;
     if (!sodium) throw new Error("Sodium.js not initialized for encryption.");
 
     const { ciphertext, mac } = sodium.crypto_aead_chacha20poly1305_ietf_encrypt_detached(
         plaintextUint8Array,
-        null, // no additional data for layer
+        null, // no additional data (AAD) for this layer
         null, // nsec not used
         ivBytes,
         keyBytes
@@ -135,7 +135,7 @@ async function chacha20Poly1305LayerEncrypt(plaintextUint8Array, keyBytes, ivByt
 }
 
 async function chacha20Poly1305LayerDecrypt(dataWithIvCipherTag, keyBytes) {
-    const sodium = await sodiumReadyPromiseInternal;
+    const sodium = await sodiumReadyPromise;
     if (!sodium) throw new Error("Sodium.js not initialized for decryption.");
 
     const iv = dataWithIvCipherTag.slice(0, IV_LENGTH);
@@ -146,7 +146,7 @@ async function chacha20Poly1305LayerDecrypt(dataWithIvCipherTag, keyBytes) {
         null, // nsec not used
         ciphertextPart,
         tagPart,
-        null, // no additional data for layer
+        null, // no additional data (AAD) for this layer
         iv,
         keyBytes
     );
@@ -157,41 +157,41 @@ async function chacha20Poly1305LayerDecrypt(dataWithIvCipherTag, keyBytes) {
 }
 
 async function finalChacha20Poly1305Encrypt(plaintextUint8Array, keyBytes, ivBytes) {
-    const sodium = await sodiumReadyPromiseInternal;
+    const sodium = await sodiumReadyPromise;
     if (!sodium) throw new Error("Sodium.js not initialized for final encryption.");
 
     const { ciphertext, mac } = sodium.crypto_aead_chacha20poly1305_ietf_encrypt_detached(
         plaintextUint8Array,
-        new Uint8Array(0), // AAD is empty for final layer as per original
+        new Uint8Array(0), // AAD is empty for the final layer
         null, // nsec not used
         ivBytes,
         keyBytes
     );
-    // Replicate the original dot-separated base64 format
-    return uint8ArrayToB64(ivBytes) + "." + uint8ArrayToB64(ciphertext) + "." + uint8ArrayToB64(mac);
+    // Output format: base64(iv).base64(ciphertext).base64(mac)
+    return uint8ArrayToBase64(ivBytes) + "." + uint8ArrayToBase64(ciphertext) + "." + uint8ArrayToBase64(mac);
 }
 
 async function initialChacha20Poly1305Decrypt(base64CiphertextWithDots, keyBytes) {
-    const sodium = await sodiumReadyPromiseInternal;
+    const sodium = await sodiumReadyPromise;
     if (!sodium) throw new Error("Sodium.js not initialized for initial decryption.");
 
     const parts = base64CiphertextWithDots.split('.');
     if (parts.length !== 3) {
-        throw new Error("Initial decryption failed: Invalid ciphertext format.");
+        throw new Error("Initial decryption failed: Invalid ciphertext format (expected 3 base64 parts separated by dots).");
     }
-    const iv = b64ToUint8Array(parts[0]);
-    const ciphertext = b64ToUint8Array(parts[1]);
-    const mac = b64ToUint8Array(parts[2]);
+    const iv = base64ToUint8Array(parts[0]);
+    const ciphertext = base64ToUint8Array(parts[1]);
+    const mac = base64ToUint8Array(parts[2]);
 
     if (iv.length !== IV_LENGTH || mac.length !== TAG_LENGTH_BYTES) {
-        throw new Error("Initial decryption failed: Invalid IV or MAC length after decoding.");
+        throw new Error("Initial decryption failed: Invalid IV or MAC length after base64 decoding.");
     }
 
     const plaintext = sodium.crypto_aead_chacha20poly1305_ietf_decrypt_detached(
         null, // nsec not used
         ciphertext,
         mac,
-        new Uint8Array(0), // AAD is empty
+        new Uint8Array(0), // AAD is empty for the final layer
         iv,
         keyBytes
     );
@@ -202,33 +202,37 @@ async function initialChacha20Poly1305Decrypt(base64CiphertextWithDots, keyBytes
     return plaintext; // This is Uint8Array
 }
 
-
-function generateRules(trajectoryA) {
+/**
+ * Generates a binary rule sequence ('0' or '1's) from a seed number string.
+ * '0' might represent AES, '1' might represent ChaCha20.
+ * @param {string} seedNumberStr - The seed number as a string.
+ * @returns {string[]} Array of '0's and '1's.
+ */
+function generateLayeringRules(seedNumberStr) {
     try {
-        const numA = BigInt(trajectoryA);
-        if (numA < 0) throw new Error("Nesting rule must be a non-negative integer.");
-        if (trajectoryA.length > 1000) throw new Error("Nesting rule number is too large (max 1000 digits).");
-        const binaryA = numA.toString(2);
-        if (binaryA.length > 100) throw new Error("Resulting binary for rules is too long (max 100 layers defined by rules).");
-        return binaryA.split('');
+        const seedBigInt = BigInt(seedNumberStr);
+        if (seedBigInt < 0) throw new Error("Layer sequence seed must be a non-negative integer.");
+        if (seedNumberStr.length > 1000) throw new Error("Layer sequence seed number string is too large (max 1000 digits).");
+
+        const binarySequence = seedBigInt.toString(2);
+        if (binarySequence.length > 100) throw new Error("Resulting binary sequence for rules is too long (max 100 layers defined by rules).");
+        return binarySequence.split('');
     } catch (e) {
-        throw new Error(`Invalid Nesting Rule A: ${e.message || "Not a valid large integer string."}`);
+        throw new Error(`Invalid Layer Sequence Seed: ${e.message || "Not a valid large integer string."}`);
     }
 }
 
-// applyUserFunction remains unchanged as it's about general JS execution
 
-async function deriveLayerSpecificMaterial(originalPasswordStr, path, upper, lower) {
+async function deriveLayerSpecificMaterial(originalPasswordStr, pathStr, upperStr, lowerStr) {
     const originalPasswordBytes = textEncoder.encode(originalPasswordStr);
+    // Create a mutable copy for potential in-place operations or zeroing
     let tempOriginalPasswordBytesView = originalPasswordBytes.slice();
 
     const pbkdf2OutputKeyLengthBits = 256;
 
-    // Assuming applyUserFunction for salt/info generation is stable or not the focus of this change
-    const layerPbkdfSalt = textEncoder.encode(path);
-    const layerHkdfSalt = textEncoder.encode(upper);
-    const layerHkdfInfo = textEncoder.encode(lower);
-
+    const layerPbkdfSalt = textEncoder.encode(pathStr);
+    const layerHkdfSalt = textEncoder.encode(upperStr);
+    const layerHkdfInfo = textEncoder.encode(lowerStr);
 
     const baseHkdfKeyForLayer = await pbkdf2DeriveBaseKeyForHkdf(
         tempOriginalPasswordBytesView,
@@ -237,6 +241,7 @@ async function deriveLayerSpecificMaterial(originalPasswordStr, path, upper, low
         pbkdf2OutputKeyLengthBits
     );
 
+    // Securely clear the temporary password view
     if (tempOriginalPasswordBytesView.fill) tempOriginalPasswordBytesView.fill(0);
 
     return await hkdfDeriveKeyAndIv(
@@ -248,170 +253,185 @@ async function deriveLayerSpecificMaterial(originalPasswordStr, path, upper, low
     );
 }
 
-function encryptString(str, funcStr, index) {
-    // 将字符串转换为 Uint8Array（UTF-8 编码）
-    const encoder = new TextEncoder();
-    const uint8Array = encoder.encode(str);
+/**
+ * Transforms the password for a specific encryption layer using a JS rule.
+ * This is a form of password obfuscation.
+ * @param {string} passwordStr - The current password string.
+ * @param {string} transformRuleJs - JS code string defining the transformation.
+ * @param {number} roundIndex - The current layer/round index.
+ * @returns {string} Base64 encoded transformed password.
+ */
+function transformPasswordForLayer(passwordStr, transformRuleJs, roundIndex) {
+    const passwordBytes = textEncoder.encode(passwordStr);
 
     try {
-        const wrappedFuncStr = `"use strict"; return data.map(byte => ${funcStr});`;
-        const userFunc = new Function('data', 'i', wrappedFuncStr);
-        let result = userFunc(uint8Array, index);
+        // transformRuleJs is expected to be a JS expression string like "byte => (byte + i) % 256"
+        const wrappedFuncStr = `"use strict"; return data.map((byte, idx) => ${transformRuleJs});`;
+        const userFunc = new Function('data', 'i', wrappedFuncStr); // 'i' here is the roundIndex
+        const transformedBytes = userFunc(passwordBytes, roundIndex);
 
-        // 将处理后的 Uint8Array 转换为 Latin1 编码的字符串
-        const binaryString = String.fromCharCode.apply(null, result);
-        // 编码成 Base64
-        const base64String = btoa(binaryString);
+        if (!transformedBytes || typeof transformedBytes.map !== 'function' || !(transformedBytes instanceof Uint8Array || Array.isArray(transformedBytes))) {
+            throw new Error("Password transformation function did not return a valid array/Uint8Array.");
+        }
+        // Ensure result is Uint8Array for String.fromCharCode.apply
+        const finalBytes = Uint8Array.from(transformedBytes);
 
-        return base64String;
+        const binaryString = String.fromCharCode.apply(null, finalBytes);
+        return btoa(binaryString); // Base64 encode
     } catch (e) {
-        console.error("Error in user-defined password obfuscation function at round " + index + ":", e);
-        throw new Error(`Password Obfuscation function error (round ${index}): ${e.message}`);
+        console.error(`Error in password transformation rule at round ${roundIndex}:`, e);
+        throw new Error(`Password Transformation Rule error (round ${roundIndex}): ${e.message}`);
     }
 }
 
-async function layeredEncrypt(plaintextStr, passwordStr, RuleA, path, upper, lower) {
-    const sodium = await sodiumReadyPromiseInternal;
-    if (!sodium) throw new Error("Sodium not initialized for encryption.");
+async function layeredEncrypt(plaintextStr, passwordStr, passwordTransformRuleJs, pathStr, upperStr, lowerStr) {
+    const sodium = await sodiumReadyPromise;
+    if (!sodium) throw new Error("Sodium.js not initialized for layered encryption.");
 
     let currentData = textEncoder.encode(plaintextStr);
-    const nestingRuleArr = textEncoder.encode(RuleA);
-    const rules = generateRules(nestingRuleArr.reduce((acc, value) => acc + value, 0));
 
-    let currentProgress = 0;
-    const totalProgressSteps = rules.length + 1;
+    // Derive the layer sequence (e.g., '01011') from the passwordTransformRuleJs string
+    const ruleBytes = textEncoder.encode(passwordTransformRuleJs);
+    const layerSequenceSeedNumber = ruleBytes.reduce((acc, byteValue) => acc + byteValue, 0);
+    const layerRules = generateLayeringRules(String(layerSequenceSeedNumber));
 
-    for (let i = 0; i < rules.length; i++) {
-        const encrypted = encryptString(passwordStr, RuleA, i);
-        const { key, iv } = await deriveLayerSpecificMaterial(encrypted, path, upper, lower);
+    const totalProgressSteps = layerRules.length + 1; // +1 for the final ChaCha layer
 
-        if (rules[i] === '0') {
+    for (let i = 0; i < layerRules.length; i++) {
+        const transformedPassword = transformPasswordForLayer(passwordStr, passwordTransformRuleJs, i);
+        const { key, iv } = await deriveLayerSpecificMaterial(transformedPassword, pathStr, upperStr, lowerStr);
+
+        if (layerRules[i] === '0') { // Assuming '0' for AES
             currentData = await aesGcmLayerEncrypt(currentData, key, iv);
-        } else {
+        } else { // Assuming '1' for ChaCha20-Poly1305
             currentData = await chacha20Poly1305LayerEncrypt(currentData, key, iv);
         }
-        currentProgress++;
-        self.postMessage({ status: 'progress', action: 'encrypt', currentStep: currentProgress, totalSteps: totalProgressSteps });
+        // Zero out key and iv after use if they are Uint8Array views and not needed anymore.
+        // However, they are re-derived in the next iteration, so this might be optional.
+        // key.fill(0); iv.fill(0); 
+        self.postMessage({ status: 'progress', action: 'encrypt', currentStep: i + 1, totalSteps: totalProgressSteps });
     }
 
-    const encrypted = encryptString(passwordStr, RuleA, rules.length);
-    const { key, iv } = await deriveLayerSpecificMaterial(encrypted, path, upper, lower);
-    const finalResultBase64 = await finalChacha20Poly1305Encrypt(currentData, key, iv);
+    // Final layer uses ChaCha20-Poly1305
+    const finalTransformedPassword = transformPasswordForLayer(passwordStr, passwordTransformRuleJs, layerRules.length);
+    const { key: finalKey, iv: finalIv } = await deriveLayerSpecificMaterial(finalTransformedPassword, pathStr, upperStr, lowerStr);
+    const finalResultBase64 = await finalChacha20Poly1305Encrypt(currentData, finalKey, finalIv);
+    // finalKey.fill(0); finalIv.fill(0);
 
-    currentProgress++;
-    self.postMessage({ status: 'progress', action: 'encrypt', currentStep: Math.min(currentProgress, totalProgressSteps), totalSteps: totalProgressSteps });
+    self.postMessage({ status: 'progress', action: 'encrypt', currentStep: totalProgressSteps, totalSteps: totalProgressSteps });
 
-    if (currentData && typeof currentData.fill === 'function') {
-        const originalPlaintextBytes = textEncoder.encode(plaintextStr);
-        let isOriginalData = currentData.length === originalPlaintextBytes.length && currentData.every((val, index) => val === originalPlaintextBytes[index]);
-        if (!isOriginalData) {
+    // Securely clear intermediate data if it's not the original plaintext
+    // (The original plaintextStr is not modified, currentData holds intermediate ciphertexts)
+    const originalPlaintextBytes = textEncoder.encode(plaintextStr);
+     if (currentData.length !== originalPlaintextBytes.length || !currentData.every((val, index) => val === originalPlaintextBytes[index])) {
+        if (typeof currentData.fill === 'function') {
             currentData.fill(0);
         }
     }
-
     return finalResultBase64;
 }
 
-async function layeredDecrypt(base64Ciphertext, passwordStr, RuleA, path, upper, lower) {
-    const sodium = await sodiumReadyPromiseInternal;
-    if (!sodium) throw new Error("Sodium not initialized for decryption.");
+async function layeredDecrypt(base64Ciphertext, passwordStr, passwordTransformRuleJs, pathStr, upperStr, lowerStr) {
+    const sodium = await sodiumReadyPromise;
+    if (!sodium) throw new Error("Sodium.js not initialized for layered decryption.");
 
-    const nestingRuleArr = textEncoder.encode(RuleA);
-    const rules = generateRules(nestingRuleArr.reduce((acc, value) => acc + value, 0));
+    // Derive the layer sequence (e.g., '01011') from the passwordTransformRuleJs string
+    const ruleBytes = textEncoder.encode(passwordTransformRuleJs);
+    const layerSequenceSeedNumber = ruleBytes.reduce((acc, byteValue) => acc + byteValue, 0);
+    const layerRules = generateLayeringRules(String(layerSequenceSeedNumber));
+    
+    const totalProgressSteps = layerRules.length + 1; // +1 for the initial ChaCha layer
 
-    const encrypted = encryptString(passwordStr, RuleA, rules.length);
-    const { key } = await deriveLayerSpecificMaterial(encrypted, path, upper, lower); // IV from final layer not directly used by initialChacha20Poly1305Decrypt as it's in the ciphertext string
+    // Initial layer uses ChaCha20-Poly1305
+    const initialTransformedPassword = transformPasswordForLayer(passwordStr, passwordTransformRuleJs, layerRules.length);
+    // IV for initialChacha20Poly1305Decrypt is part of base64CiphertextWithDots
+    const { key: initialKey } = await deriveLayerSpecificMaterial(initialTransformedPassword, pathStr, upperStr, lowerStr);
+    let currentData = await initialChacha20Poly1305Decrypt(base64Ciphertext, initialKey);
+    // initialKey.fill(0);
 
-    let currentProgress = 0;
-    const totalProgressSteps = rules.length + 1;
-
-    let currentData = await initialChacha20Poly1305Decrypt(base64Ciphertext, key);
-
-    currentProgress++;
-    self.postMessage({ status: 'progress', action: 'decrypt', currentStep: currentProgress, totalSteps: totalProgressSteps });
-
-    for (let i = rules.length - 1; i >= 0; i--) {
-        const encrypted = encryptString(passwordStr, RuleA, i);
-        const { key: layerKey, iv: layerIv } = await deriveLayerSpecificMaterial(encrypted, path, upper, lower); // IV needed for layer decryption
-        if (rules[i] === '0') {
-            currentData = await aesGcmLayerDecrypt(currentData, layerKey);
-        } else {
-            currentData = await chacha20Poly1305LayerDecrypt(currentData, layerKey); // layerKey and implicit IV from data
-        }
-        currentProgress++;
-        self.postMessage({ status: 'progress', action: 'decrypt', currentStep: currentProgress, totalSteps: totalProgressSteps });
-    }
+    self.postMessage({ status: 'progress', action: 'decrypt', currentStep: 1, totalSteps: totalProgressSteps });
 
     try {
+        for (let i = layerRules.length - 1; i >= 0; i--) {
+            const transformedPassword = transformPasswordForLayer(passwordStr, passwordTransformRuleJs, i);
+            const { key: layerKey, iv: layerIv } = await deriveLayerSpecificMaterial(transformedPassword, pathStr, upperStr, lowerStr);
+
+            if (layerRules[i] === '0') { // Assuming '0' for AES
+                currentData = await aesGcmLayerDecrypt(currentData, layerKey);
+            } else { // Assuming '1' for ChaCha20-Poly1305
+                currentData = await chacha20Poly1305LayerDecrypt(currentData, layerKey);
+            }
+            // layerKey.fill(0); layerIv.fill(0); // Optional: zero out after use
+            self.postMessage({ status: 'progress', action: 'decrypt', currentStep: layerRules.length - i + 1, totalSteps: totalProgressSteps });
+        }
         return textDecoder.decode(currentData);
     } finally {
-        if (currentData && typeof currentData.fill === 'function') currentData.fill(0);
+        // Securely clear the final plaintext bytes or intermediate decrypted data
+        if (currentData && typeof currentData.fill === 'function') {
+            currentData.fill(0);
+        }
     }
 }
 
 self.onmessage = async (e) => {
-    let response;
-    const { action, plaintext, ciphertext, password, nestingRuleA, path, upper, lower } = e.data;
+    let responsePayload;
+    const { action, plaintext, ciphertext, password, passwordTransformRuleJs, path, upper, lower } = e.data;
 
     try {
-        const sodium = await sodiumReadyPromiseInternal;
+        const sodium = await sodiumReadyPromise; // Ensure sodium is ready before proceeding
         if (!sodium) {
             throw new Error("Sodium.js failed to initialize. Cannot perform crypto operations.");
         }
 
         if (action === 'encrypt') {
-            if (!plaintext || !password || !nestingRuleA || !path || !upper || !lower) {
-                throw new Error("Missing parameters for encryption: Data, Password, Nesting Rule, and Obfuscation Function are required.");
+            if (!plaintext || !password || !passwordTransformRuleJs || !path || !upper || !lower) {
+                throw new Error("Missing parameters for encryption: plaintext, password, passwordTransformRuleJs, path, upper, and lower are required.");
             }
-            const result = await layeredEncrypt(plaintext, password, nestingRuleA, path, upper, lower);
-            response = { status: 'success', action, result };
+            const result = await layeredEncrypt(plaintext, password, passwordTransformRuleJs, path, upper, lower);
+            responsePayload = { status: 'success', action, result };
         } else if (action === 'decrypt') {
-            if (!ciphertext || !password || !nestingRuleA || !path || !upper || !lower) {
-                throw new Error("Missing parameters for decryption.");
+            if (!ciphertext || !password || !passwordTransformRuleJs || !path || !upper || !lower) {
+                throw new Error("Missing parameters for decryption: ciphertext, password, passwordTransformRuleJs, path, upper, and lower are required.");
             }
-            const result = await layeredDecrypt(ciphertext, password, nestingRuleA, path, upper, lower);
-            response = { status: 'success', action, result };
+            const result = await layeredDecrypt(ciphertext, password, passwordTransformRuleJs, path, upper, lower);
+            responsePayload = { status: 'success', action, result };
         } else {
             throw new Error(`Unknown action: ${action}`);
         }
     } catch (err) {
-        console.error(`Worker error during ${action}:`, err);
-        const errorMessage = (err && typeof err.message === 'string') ? err.message : 'An unknown error occurred';
-        response = { status: 'error', action: action || 'unknown', error: errorMessage };
+        console.error(`Worker error during ${action || 'unknown_action'}:`, err);
+        const errorMessage = (err && typeof err.message === 'string') ? err.message : 'An unknown error occurred in the worker.';
+        responsePayload = { status: 'error', action: action || 'unknown_action', error: errorMessage };
     }
-    self.postMessage(response);
+    self.postMessage(responsePayload);
 };
 
-// Base64 to Uint8Array and vice-versa (worker context, so no DOM)
-// These are standard Base64, compatible with sodium.to_base64(..., sodium.base64_variants.ORIGINAL)
-// and sodium.from_base64(..., sodium.base64_variants.ORIGINAL)
-// For simplicity and minimal change, keeping these helpers if they are correct.
-// sodium.js itself uses atob/btoa for its base64 helpers if TextEncoder/Decoder are not available for all paths.
-function b64ToUint8Array(b64) {
+// --- Base64 Utilities ---
+function base64ToUint8Array(base64Str) {
     try {
-        const byteString = atob(b64);
-        const len = byteString.length;
+        const binaryString = atob(base64Str);
+        const len = binaryString.length;
         const bytes = new Uint8Array(len);
         for (let i = 0; i < len; i++) {
-            bytes[i] = byteString.charCodeAt(i);
+            bytes[i] = binaryString.charCodeAt(i);
         }
         return bytes;
     } catch (e) {
-        console.error("b64ToUint8Array error:", e);
-        throw new Error("Invalid Base64 string for Uint8Array conversion.");
+        console.error("base64ToUint8Array error:", e.message);
+        throw new Error("Invalid Base64 string provided for conversion to Uint8Array.");
     }
 }
 
-function uint8ArrayToB64(arr) {
+function uint8ArrayToBase64(uint8Array) {
     try {
-        let binary = '';
-        const len = arr.byteLength;
+        let binaryString = '';
+        const len = uint8Array.byteLength;
         for (let i = 0; i < len; i++) {
-            binary += String.fromCharCode(arr[i]);
+            binaryString += String.fromCharCode(uint8Array[i]);
         }
-        return btoa(binary);
+        return btoa(binaryString);
     } catch (e) {
-        console.error("uint8ArrayToB64 error:", e);
-        throw new Error("Failed to convert Uint8Array to Base64.");
+        console.error("uint8ArrayToBase64 error:", e.message);
+        throw new Error("Failed to convert Uint8Array to Base64 string.");
     }
 }
