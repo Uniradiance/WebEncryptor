@@ -1,0 +1,257 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 20px;
+    background-color: #f4f7f9;
+    color: #333;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+}
+
+.container {
+    background-color: #fff;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    width: 100%;
+    max-width: 700px;
+}
+
+h1 {
+    text-align: center;
+    color: #2c3e50;
+    margin-bottom: 25px;
+    font-size: 1.8em;
+}
+
+h2 {
+    color: #34495e;
+    margin-top: 0;
+    margin-bottom: 20px;
+    font-size: 1.4em;
+    border-bottom: 2px solid #eee;
+    padding-bottom: 10px;
+}
+
+.tabs {
+    display: flex;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #ddd;
+}
+
+.tab-button {
+    padding: 10px 20px;
+    cursor: pointer;
+    border: none;
+    background-color: transparent;
+    font-size: 1em;
+    color: #7f8c8d;
+    transition: all 0.3s ease;
+    border-bottom: 3px solid transparent;
+}
+
+.tab-button.active {
+    color: #3498db;
+    border-bottom-color: #3498db;
+    font-weight: bold;
+}
+
+.tab-button:hover:not(.active) {
+    color: #3498db;
+}
+
+.tab-content {
+    display: none;
+    animation: fadeIn 0.5s;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: bold;
+    color: #555;
+}
+
+.form-group input[type="text"],
+.form-group input[type="password"],
+.form-group textarea {
+    width: calc(100% - 20px);
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    font-size: 0.95em;
+    transition: border-color 0.3s ease;
+    box-sizing: border-box;
+}
+
+.form-group input[type="text"]:focus,
+.form-group input[type="password"]:focus,
+.form-group textarea:focus {
+    border-color: #3498db;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+}
+
+.form-group textarea {
+    resize: vertical;
+    min-height: 60px;
+}
+
+.form-group small {
+    display: block;
+    margin-top: 5px;
+    font-size: 0.8em;
+    color: #777;
+}
+.form-group small code {
+    background-color: #e8e8e8;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: 'Courier New', Courier, monospace;
+}
+
+
+.button {
+    display: inline-block;
+    background-color: #3498db;
+    color: white;
+    padding: 12px 25px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1em;
+    font-weight: bold;
+    transition: background-color 0.3s ease, transform 0.1s ease;
+    text-align: center;
+}
+
+.button:hover {
+    background-color: #2980b9;
+}
+
+.button:active {
+    transform: translateY(1px);
+}
+
+.button:disabled {
+    background-color: #bdc3c7;
+    cursor: not-allowed;
+}
+
+.secondary-button {
+    background-color: #95a5a6;
+}
+.secondary-button:hover {
+    background-color: #7f8c8d;
+}
+
+
+.output-group {
+    margin-top: 25px;
+}
+
+.output-group textarea {
+    background-color: #ecf0f1;
+    font-family: 'Courier New', Courier, monospace;
+}
+
+.loading-indicator {
+    text-align: center;
+    padding: 15px;
+    margin-top: 20px;
+    font-size: 1.1em;
+    color: #3498db;
+}
+
+.error-message {
+    background-color: #e74c3c;
+    color: white;
+    padding: 15px;
+    border-radius: 5px;
+    margin-top: 20px;
+    text-align: center;
+    font-weight: bold;
+}
+
+.progress-bar-container {
+    width: 100%;
+    background-color: #e9ecef; /* Light gray, blends with light backgrounds */
+    border-radius: 8px;
+    margin-top: 15px;
+    margin-bottom: 15px;
+    padding: 4px;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+    height: 28px; /* Slightly taller for text */
+    box-sizing: border-box;
+    position: relative; /* For absolute positioning of text */
+    overflow: hidden; /* Ensures inner bar radius is neat */
+}
+
+.progress-bar {
+    height: 100%;
+    width: 0%; /* Start at 0% */
+    background-color: #3498db; /* Active color */
+    border-radius: 5px; /* Slightly less than container for padding effect */
+    transition: width 0.2s ease-out;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.progress-text {
+    position: absolute;
+    width: 100%;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    text-align: center;
+    font-size: 0.85em;
+    color: #ffffff; /* White text on blue bar */
+    font-weight: bold;
+    z-index: 1; /* Ensure text is above the bar */
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.2); /* Slight shadow for readability */
+}
+
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+    .container {
+        margin: 10px;
+        padding: 20px;
+    }
+
+    h1 {
+        font-size: 1.6em;
+    }
+
+    .tab-button {
+        padding: 8px 12px;
+        font-size: 0.9em;
+    }
+
+    .button {
+        padding: 10px 20px;
+        font-size: 0.95em;
+        width: 100%;
+        box-sizing: border-box;
+    }
+    .output-group .button {
+        margin-top: 10px;
+    }
+}

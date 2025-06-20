@@ -1,0 +1,91 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Offline Encryptor</title>
+    <link rel="stylesheet" href="index.css">
+    <link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="index.css">
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.1.0/",
+    "react": "https://esm.sh/react@^19.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/"
+  }
+}
+</script>
+</head>
+<body>
+    <div class="container">
+        <h1>Advanced Offline Encryptor</h1>
+
+        <div class="tabs">
+            <button class="tab-button active" data-tab="encrypt">Encrypt</button>
+            <button class="tab-button" data-tab="decrypt">Decrypt</button>
+        </div>
+
+        <div id="encrypt" class="tab-content active">
+            <h2>Encrypt Data</h2>
+            <div class="form-group">
+                <label for="plaintext">Data to Encrypt:</label>
+                <textarea id="plaintext" rows="3" aria-label="Data to encrypt"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="passwordEncrypt">Password for Encryption:</label>
+                <input type="password" id="passwordEncrypt" aria-label="Password for encryption">
+            </div>
+            <div class="form-group">
+                <label for="nestingRuleAEncrypt">Nesting Rule (Large Number A):</label>
+                <input type="text" id="nestingRuleAEncrypt" inputmode="numeric" aria-label="Nesting rule number A for encryption">
+            </div>
+            <div class="form-group">
+                <label for="obfuscationFunctionEncrypt">Interactive Color Grid (Path):</label>
+                <div id="ChessboardEncrypt"></div>
+            </div>
+            <button id="encryptButton" class="button">Encrypt</button>
+            <div class="output-group">
+                <label for="ciphertextOutput">Ciphertext (Base64):</label>
+                <textarea id="ciphertextOutput" rows="5" readonly aria-label="Encrypted ciphertext in Base64"></textarea>
+                <button id="copyCiphertextButton" class="button secondary-button">Copy Ciphertext</button>
+            </div>
+        </div>
+
+        <div id="decrypt" class="tab-content">
+            <h2>Decrypt Data</h2>
+            <div class="form-group">
+                <label for="ciphertextInput">Ciphertext (Base64):</label>
+                <textarea id="ciphertextInput" rows="5" aria-label="Ciphertext in Base64 to decrypt"></textarea>
+            </div>
+             <div class="form-group">
+                <label for="passwordDecrypt">Password (used for encryption):</label>
+                <input type="password" id="passwordDecrypt" aria-label="Password used during encryption">
+            </div>
+            <div class="form-group">
+                <label for="nestingRuleADecrypt">Nesting Rule (Large Number A):</label>
+                <input type="text" id="nestingRuleADecrypt" inputmode="numeric" aria-label="Nesting rule number A for decryption">
+            </div>
+            <div class="form-group">
+                <label for="obfuscationFunctionDecrypt">Interactive Color Grid (Path):</label>
+                <div id="ChessboardDecrypt"></div>
+            </div>
+            <button id="decryptButton" class="button">Decrypt</button>
+            <div class="output-group">
+                <label for="plaintextOutput">Decrypted Plaintext:</label>
+                <textarea id="plaintextOutput" rows="3" readonly aria-label="Decrypted plaintext"></textarea>
+            </div>
+        </div>
+
+        <div id="loadingIndicator" class="loading-indicator" style="display: none;">Initializing Worker...</div>
+        <div class="progress-bar-container" id="progressBarContainer" style="display: none;" aria-live="polite">
+            <div class="progress-bar" id="progressBar"></div>
+            <span class="progress-text" id="progressText"></span>
+        </div>
+        <div id="errorDisplay" class="error-message" style="display: none;"></div>
+    </div>
+
+    <script type="module" src="index.js"></script>
+</body>
+</html>

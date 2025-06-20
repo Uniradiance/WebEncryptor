@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>加密字符串测试</title>
+</head>
+
+<body>
+    <h1>加密字符串测试</h1>
+    <input type="text" id="inputString" placeholder="请输入要加密的字符串">
+    <button onclick="encryptAndDisplay()">加密</button>
+    <p>加密结果 (Base64): <span id="result"></span></p>
+    <button onclick="stringToInt()">String</button>
+    <p>Int : <span id="Intvalue"></span></p>
+    <button onclick="exec()">String</button>
+    <p>exec : <span id="execResult"></span></p>
+
+    <script>
+        // 加密函数
+        function encryptString(str, operationFunc) {
+            const encoder = new TextEncoder();
+            const uint8Array = encoder.encode(str);
+            const processedData = operationFunc(uint8Array);
+            const binaryString = String.fromCharCode.apply(null, processedData);
+            const base64String = btoa(binaryString);
+            return base64String;
+        }
+
+        // 示例位操作函数：对每个字节进行异或操作
+        function xorOperation(data) {
+            return data.map(byte => (byte ^ 0x55) & 0xFF);
+        }
+
+        function applyUserFunction(funcStr, roundIndex) {
+            try {
+                const wrappedFuncStr = `"use strict"; ${funcStr}`;
+                const userFunc = new Function('passwordBytes', 'roundIndex', wrappedFuncStr);
+                let result = userFunc("112233",roundIndex);
+                console.log(result)
+                console.log(userFunc);
+                return result;
+            } catch (e) {
+                console.error("Error in user-defined password obfuscation function at round " + roundIndex + ":", e);
+                throw new Error(`Password Obfuscation function error (round ${roundIndex}): ${e.message}`);
+            }
+        }
+
+        // 点击按钮后执行加密并显示结果
+        function encryptAndDisplay() {
+            const input = document.getElementById('inputString').value;
+            const encrypted = encryptString(input, xorOperation);
+            document.getElementById('result').textContent = encrypted;
+        }
+        // 点击按钮后执行加密并显示结果
+        function stringToInt() {
+            const encoder = new TextEncoder();
+            const uint8Array = encoder.encode("byte => (byte ^ 0x55) & 0xFF");
+            const sum = uint8Array.reduce((acc, value) => acc + value, 0);
+            document.getElementById('Intvalue').textContent = sum;
+        }
+        function exec(){
+            const input = document.getElementById('inputString').value;
+            const result = applyUserFunction(input,"10");
+            document.getElementById('execResult').textContent = result;
+        }
+    </script>
+</body>
+
+</html>
