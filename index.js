@@ -1,3 +1,4 @@
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.js'; // Ensure .js extension
@@ -8,21 +9,23 @@ const getElement = (id) => {
     return el;
 };
 
+// Input/Output Elements
 const plaintextInput = getElement('plaintext');
-const passwordEncryptInput = getElement('passwordEncrypt'); // New password input for encryption
-const nestingRuleAEncryptInput = getElement('nestingRuleAEncrypt');
+const passwordEncryptInput = getElement('passwordEncrypt');
+const ruleEncryptInput = getElement('RuleEncrypt');
 const ChessboardEncryptInput = getElement('ChessboardEncrypt');
 const encryptButton = getElement('encryptButton');
 const ciphertextOutput = getElement('ciphertextOutput');
 const copyCiphertextButton = getElement('copyCiphertextButton');
 
 const ciphertextInput = getElement('ciphertextInput');
-const nestingRuleADecryptInput = getElement('nestingRuleADecrypt');
+const ruleDecryptInput = getElement('RuleDecrypt');
 const ChessboardDecryptInput = getElement('ChessboardDecrypt');
 const passwordDecryptInput = getElement('passwordDecrypt');
 const decryptButton = getElement('decryptButton');
 const plaintextOutput = getElement('plaintextOutput');
 
+// UI State Elements
 const loadingIndicator = getElement('loadingIndicator');
 const errorDisplay = getElement('errorDisplay');
 const progressBarContainer = getElement('progressBarContainer');
@@ -34,205 +37,311 @@ const tabContents = document.querySelectorAll('.tab-content');
 
 let cryptoWorker = null;
 
+// Store React component refs
+window.reactAppRefs = {
+    encryptBoard: React.createRef(),
+    decryptBoard: React.createRef()
+};
+
+function displayError(message) {
+    errorDisplay.textContent = message;
+    errorDisplay.style.display = 'block';
+    loadingIndicator.style.display = 'none'; // Ensure loading indicator is hidden on error
+}
+
+function clearError() {
+    errorDisplay.textContent = '';
+    errorDisplay.style.display = 'none';
+}
+
+function resetUIState(errorMessage = null, successMessage = null) {
+    encryptButton.disabled = false;
+    decryptButton.disabled = false;
+
+    setTimeout(() => {
+        loadingIndicator.style.display = 'none';
+        progressBarContainer.style.display = 'none';
+        progressBar.style.width = '0%';
+        progressText.textContent = '';
+    }, errorMessage ? 0 : 5000);
+
+    if (errorMessage) {
+        displayError(errorMessage);
+    } else {
+        clearError(); // Clear previous errors if no new one
+    }
+
+    if (successMessage) {
+        // Display temporary success message if needed (e.g., for validation)
+        progressText.textContent = successMessage;
+        progressBarContainer.style.display = 'block'; // Show progress bar area for this message
+        setTimeout(() => {
+            if (progressText.textContent === successMessage) {
+                progressText.textContent = '';
+                // Only hide progress bar if it's not showing another message (e.g. error)
+                if (errorDisplay.style.display === 'none') {
+                    progressBarContainer.style.display = 'none';
+                }
+            }
+        }, 2500);
+    }
+}
+
+function startProcessing(message) {
+    clearError();
+    loadingIndicator.style.display = 'none'; // Hide loading indicator if it was shown
+    progressBarContainer.style.display = 'block';
+    progressBar.style.width = '0%';
+    progressText.textContent = message;
+    encryptButton.disabled = true;
+    decryptButton.disabled = true;
+}
+
+
+function getChessboardData(boardId, type, isUpperHalf = false) {
+    if (!window.reactAppRef || !window.reactAppRef.current) {
+        throw new Error(`React App Ref for board '${boardId}' not found or not mounted.`);
+    }
+    const boardComponent = window.reactAppRef.current;
+    let result = null;
+
+    if (type === 'full') {
+        if (typeof boardComponent.getFullData !== 'function') {
+            throw new Error(`getFullData method not found on board '${boardId}'.`);
+        }
+        result = boardComponent.getFullData();
+    } else if (type === 'half') {
+        if (typeof boardComponent.getHalfData !== 'function') {
+            throw new Error(`getHalfData method not found on board '${boardId}'.`);
+        }
+        result = boardComponent.getHalfData(isUpperHalf);
+    } else {
+        throw new Error(`Invalid data type '${type}' requested for chessboard.`);
+    }
+
+    if (result == null) {
+        throw new Error(`Chessboard data is empty or invalid for '${boardId}' (type: ${type}). Ensure pieces are placed correctly.`);
+    }
+    return result;
+}
+
+
+function handleEncryptResponse(data) {
+    if (data.status === 'success') {
+        const encryptedData = data.result;
+
+        try {
+            // Parameters for verification from the DECRYPT tab
+            const passwordForVerify = passwordEncryptInput.value;
+            const ruleForVerify = ruleEncryptInput.value;
+            const pathForVerify = getChessboardData('decryptBoard', 'full');
+            const upperForVerify = getChessboardData('decryptBoard', 'half', true);
+            const lowerForVerify = getChessboardData('decryptBoard', 'half', false);
+
+            ciphertextOutput.innerText = encryptedData; // Show encrypted data
+            if (!passwordForVerify || !ruleForVerify) {
+                resetUIState('Encryption Succeeded. Auto-validation skipped: Missing Password or Nesting Rule on Decrypt tab.');
+                return;
+            }
+            startProcessing('Validating encryption...');
+            cryptoWorker.postMessage({
+                action: 'verify',
+                ciphertext: encryptedData,
+                password: passwordForVerify,
+                passwordTransformRuleJs: ruleForVerify,
+                path: pathForVerify,
+                upper: upperForVerify,
+                lower: lowerForVerify
+            });
+
+        } catch (err) { // Error getting chessboard data for verification or other setup issues
+            ciphertextOutput.innerText = encryptedData; // Show encrypted data if validation setup fails
+            resetUIState(`Encryption Succeeded. Auto-validation skipped: ${err.message}. Ensure Decrypt tab is correctly configured.`);
+        }
+    } else { // Encryption failed
+        ciphertextOutput.innerText = '';
+        resetUIState(`Encryption failed: ${data.error}`);
+    }
+}
+
+function handleUserDecryptResponse(data) {
+    if (data.status === 'success') {
+        plaintextOutput.innerText = data.result;
+        resetUIState();
+    } else {
+        plaintextOutput.innerText = '';
+        resetUIState(`Decryption failed: ${data.error}`);
+    }
+}
+
+function handleVerifyResponse(data) {
+    if (data.status === 'success') {
+        resetUIState();
+    } else { // Verification (decryption step inside worker) failed
+        ciphertextOutput.innerText = '';
+        resetUIState(`Auto-decryption validation failed during decryption: ${data.error}. Ciphertext not shown.`);
+    }
+}
+
+
 function initializeWorker() {
     if (window.Worker) {
-        cryptoWorker = new Worker('./crypto_worker.js');
+        cryptoWorker = new Worker('./crypto_worker.js'); // Ensure worker path is correct
 
         cryptoWorker.onmessage = (e) => {
             if (e.data.status === 'progress') {
-                loadingIndicator.style.display = 'none';
+                loadingIndicator.style.display = 'none'; // Should be hidden by startProcessing
                 progressBarContainer.style.display = 'block';
-                const { currentStep, totalSteps } = e.data;
+                const { currentStep, totalSteps, stepName } = e.data;
                 if (typeof currentStep === 'number' && typeof totalSteps === 'number' && totalSteps > 0) {
                     const percentage = Math.max(0, Math.min(100, (currentStep / totalSteps) * 100));
                     progressBar.style.width = `${percentage}%`;
-                    progressText.textContent = `Step ${currentStep} of ${totalSteps}`;
+                    progressText.textContent = stepName ? `${stepName} (${currentStep}/${totalSteps})` : `Step ${currentStep} of ${totalSteps}`;
                 }
+                // Buttons are already disabled by startProcessing
                 return;
             }
-            
-            progressBarContainer.style.display = 'none';
-            progressBar.style.width = '0%';
-            progressText.textContent = '';
-            encryptButton.disabled = false;
-            decryptButton.disabled = false;
 
-            if (e.data.status === 'success') {
-                errorDisplay.style.display = 'none';
-                errorDisplay.textContent = '';
-                if (e.data.action === 'encrypt') {
-                    ciphertextOutput.value = e.data.result;
-                } else if (e.data.action === 'decrypt') {
-                    plaintextOutput.value = e.data.result;
+            // Non-progress messages
+            try {
+                switch (e.data.action) {
+                    case 'encrypt':
+                        handleEncryptResponse(e.data);
+                        break;
+                    case 'decrypt': // This is for user-initiated decryption
+                        handleUserDecryptResponse(e.data);
+                        break;
+                    case 'verify': // This is the response from auto-validation decryption
+                        handleVerifyResponse(e.data);
+                        break;
+                    case 'worker_init_sodium_ready':
+                        break;
+                    case 'worker_init_sodium_failed':
+                        break;
+                    default:
+                        console.warn('Unknown worker action:', e.data.action, e.data);
+                        resetUIState(`Received unknown action from worker: ${e.data.action}`);
                 }
-            } else if (e.data.status === 'error') {
-                plaintextOutput.value = '';
-                ciphertextOutput.value = '';
-                errorDisplay.textContent = `Error: ${e.data.error}`;
-                errorDisplay.style.display = 'block';
-                console.error('Worker error:', e.data.error);
+            } catch (error) {
+                console.error('Error processing worker message:', error, e.data);
+                resetUIState(`Client-side error processing worker response: ${error.message}`);
             }
         };
 
         cryptoWorker.onerror = (e) => {
-            progressBarContainer.style.display = 'none';
-            loadingIndicator.style.display = 'none';
-            encryptButton.disabled = false;
-            decryptButton.disabled = false;
-            errorDisplay.textContent = `Worker critical error: ${e.message}`;
-            errorDisplay.style.display = 'block';
-            console.error('Worker onerror:', e);
+            console.error('Worker critical error:', e);
+            resetUIState(`Worker critical error: ${e.message}. Please refresh the page or check browser console.`);
+            // Optionally, try to re-initialize or disable functionality
         };
-        
-        loadingIndicator.textContent = "Initializing Worker...";
+
+        // Indicate worker is ready or initializing.
+        // resetUIState will hide loadingIndicator eventually if no errors.
+        loadingIndicator.textContent = "Worker initialized.";
         loadingIndicator.style.display = 'block';
-        
         setTimeout(() => {
-            if (progressBarContainer.style.display === 'none' && errorDisplay.style.display === 'none') {
-                 loadingIndicator.style.display = 'none';
+            if (loadingIndicator.textContent === "Worker initialized.") {
+                loadingIndicator.style.display = 'none';
             }
         }, 1500);
 
+
     } else {
-        errorDisplay.textContent = 'Web Workers are not supported in your browser.';
-        errorDisplay.style.display = 'block';
+        displayError('Web Workers are not supported in your browser. This application cannot function.');
         encryptButton.disabled = true;
         decryptButton.disabled = true;
         loadingIndicator.style.display = 'none';
     }
 }
 
-function displayError(message) {
-    errorDisplay.textContent = message;
-    errorDisplay.style.display = 'block';
-    loadingIndicator.style.display = 'none';
-    progressBarContainer.style.display = 'none';
-}
-
-function startProcessing() {
-    errorDisplay.style.display = 'none';
-    loadingIndicator.style.display = 'none'; 
-    progressBarContainer.style.display = 'block';
-    progressBar.style.width = '0%';
-    progressText.textContent = 'Starting...';
-    encryptButton.disabled = true;
-    decryptButton.disabled = true;
-}
-
-function getFullData() {
-    // 确保React组件已加载
-    if (!window.reactAppRef || !window.reactAppRef.current) {
-        throw new Error("The cell is empty! ");
-    }
-
-    const result = window.reactAppRef.current.getFullData();
-    if (result == null) throw new Error("The cell is empty! ");
-
-    return result;
-}
-
-function getHalfData(isUpperHalf) {
-    // 确保React组件已加载
-    if (!window.reactAppRef || !window.reactAppRef.current) {
-        throw new Error("The cell is empty! ");
-    }
-
-    
-    const result = window.reactAppRef.current.getHalfData(isUpperHalf);
-    if (result == null) throw new Error("The cell is empty! ");
-    
-    return result;
-}
 
 encryptButton.addEventListener('click', () => {
     if (!cryptoWorker) {
-        displayError("Crypto worker not initialized.");
+        displayError("Crypto worker not initialized. Please refresh.");
         return;
     }
     const plaintext = plaintextInput.value;
-    const password = passwordEncryptInput.value; // Get password for encryption
-    const nestingRuleA = nestingRuleAEncryptInput.value;
+    const password = passwordEncryptInput.value;
+    const passwordTransformRuleJs = ruleEncryptInput.value;
 
-    if (!plaintext || !password || !nestingRuleA) {
-        displayError('All fields for encryption (Data, Password, Nesting Rule, Obfuscation Function) are required.');
+    if (!plaintext || !password || !passwordTransformRuleJs) {
+        displayError('All fields for encryption (Data, Password, Nesting Rule) on Encrypt tab are required.');
         return;
     }
 
-    const _path = getFullData();
-    const _upper = getHalfData(true);
-    const _lower = getHalfData(false);
+    try {
+        const path = getChessboardData('encryptBoard', 'full');
+        const upper = getChessboardData('encryptBoard', 'half', true);
+        const lower = getChessboardData('encryptBoard', 'half', false);
 
-    if (!_path || !_upper || !_lower){
-        displayError('There are not enough chess pieces.');
-        return;
+        startProcessing('Encrypting...');
+        ciphertextOutput.innerText = ''; // Clear previous output
+
+        cryptoWorker.postMessage({
+            action: 'encrypt',
+            plaintext,
+            password,
+            passwordTransformRuleJs,
+            path,
+            upper,
+            lower,
+        });
+    } catch (err) {
+        displayError(`Chessboard error for encryption: ${err.message}`);
     }
-
-    startProcessing();
-    ciphertextOutput.value = '';
-
-    const payload = {
-        action: 'encrypt',
-        plaintext,
-        password: password, // Use the dedicated password field
-        nestingRuleA,
-        path: _path,
-        upper: _upper,
-        lower:_lower,
-    };
-    cryptoWorker.postMessage(payload);
 });
 
 decryptButton.addEventListener('click', () => {
     if (!cryptoWorker) {
-        displayError("Crypto worker not initialized.");
+        displayError("Crypto worker not initialized. Please refresh.");
         return;
     }
     const ciphertext = ciphertextInput.value;
-    const nestingRuleA = nestingRuleADecryptInput.value;
     const password = passwordDecryptInput.value;
+    const passwordTransformRuleJs = ruleDecryptInput.value;
 
-    if (!ciphertext || !password || !nestingRuleA) {
-        displayError('All fields for decryption are required.');
+
+    if (!ciphertext || !password || !passwordTransformRuleJs) {
+        displayError('All fields for decryption (Ciphertext, Password, Nesting Rule) on Decrypt tab are required.');
         return;
     }
 
-    const _path = getFullData();
-    const _upper = getHalfData(true);
-    const _lower = getHalfData(false);
+    try {
+        const path = getChessboardData('decryptBoard', 'full');
+        const upper = getChessboardData('decryptBoard', 'half', true);
+        const lower = getChessboardData('decryptBoard', 'half', false);
 
-    if (!_path || !_upper || !_lower){
-        displayError('There are not enough chess pieces.');
-        return;
+        startProcessing('Decrypting...');
+        plaintextOutput.innerText = ''; // Clear previous output
+
+        cryptoWorker.postMessage({
+            action: 'decrypt',
+            ciphertext,
+            password,
+            passwordTransformRuleJs,
+            path,
+            upper,
+            lower,
+        });
+    } catch (err) {
+        displayError(`Chessboard error for decryption: ${err.message}`);
     }
-
-    startProcessing();
-    plaintextOutput.value = '';
-
-    const payload = {
-        action: 'decrypt',
-        ciphertext,
-        password,
-        nestingRuleA,
-        path:_path,
-        upper:_upper,
-        lower:_lower,
-    };
-    cryptoWorker.postMessage(payload);
 });
 
 copyCiphertextButton.addEventListener('click', async () => {
-    if (!ciphertextOutput.value) {
+    if (!ciphertextOutput.innerText) {
         displayError('No ciphertext to copy.');
-        setTimeout(() => { if(errorDisplay.textContent === 'No ciphertext to copy.') errorDisplay.style.display = 'none'; }, 2000);
+        setTimeout(() => { if (errorDisplay.textContent === 'No ciphertext to copy.') clearError(); }, 2000);
         return;
     }
     try {
-        await navigator.clipboard.writeText(ciphertextOutput.value);
-        const originalText = copyCiphertextButton.textContent;
-        copyCiphertextButton.textContent = 'Copied!';
+        await navigator.clipboard.writeText(ciphertextOutput.innerText);
         copyCiphertextButton.disabled = true;
+        loadingIndicator.textContent = "The copy has been successful.";
+        loadingIndicator.style.display = 'block';
         setTimeout(() => {
-            copyCiphertextButton.textContent = originalText;
+            if (loadingIndicator.textContent === "The copy has been successful.") {
+                loadingIndicator.style.display = 'none';
+            }
             copyCiphertextButton.disabled = false;
         }, 1500);
     } catch (err) {
@@ -253,22 +362,22 @@ tabs.forEach(tab => {
                 content.classList.add('active');
             }
         });
-        errorDisplay.style.display = 'none';
-        errorDisplay.textContent = '';
-        ciphertextOutput.value = '';
-        plaintextOutput.value = '';
-        progressBarContainer.style.display = 'none'; 
-        encryptButton.disabled = false; 
-        decryptButton.disabled = false;
+        // Reset UI state when switching tabs
+        resetUIState();
+        ciphertextOutput.innerText = '';
+        plaintextOutput.innerText = '';
     });
 });
 
-const cell_encrypt = ReactDOM.createRoot(ChessboardEncryptInput);
-const cell_decrypt = ReactDOM.createRoot(ChessboardDecryptInput);
-// Replace JSX with React.createElement
+// Initialize React Components
+const cell_encrypt_root = ReactDOM.createRoot(ChessboardEncryptInput);
+const cell_decrypt_root = ReactDOM.createRoot(ChessboardDecryptInput);
 
-const chessboard = React.createElement(App)
-cell_encrypt.render(chessboard);
-cell_decrypt.render(chessboard);
+// Pass refs to App component instances
+const AppInstanceEncrypt = React.createElement(App);
 
+cell_encrypt_root.render(AppInstanceEncrypt);
+cell_decrypt_root.render(AppInstanceEncrypt);
+
+// Initialize the worker last, after UI is set up
 initializeWorker();

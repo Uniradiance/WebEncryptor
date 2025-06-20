@@ -389,7 +389,7 @@ self.onmessage = async (e) => {
             }
             const result = await layeredEncrypt(plaintext, password, passwordTransformRuleJs, path, upper, lower);
             responsePayload = { status: 'success', action, result };
-        } else if (action === 'decrypt') {
+        } else if (action === 'decrypt' | action === 'verify') {
             if (!ciphertext || !password || !passwordTransformRuleJs || !path || !upper || !lower) {
                 throw new Error("Missing parameters for decryption: ciphertext, password, passwordTransformRuleJs, path, upper, and lower are required.");
             }

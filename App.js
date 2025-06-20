@@ -235,7 +235,7 @@ const App = () => {
   }, [isDragging, interactionOriginCell, nextColorForOriginOrDrag, handlePointerMoveOverCell, updateCellColor, cells]);
 
   const appStyle = {
-    minHeight: '100vh',
+    minHeight: '10vh',
     padding: '1rem',
     display: 'flex',
     flexDirection: 'column',
