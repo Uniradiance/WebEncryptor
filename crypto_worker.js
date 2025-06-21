@@ -234,10 +234,6 @@ async function deriveLayerSpecificMaterial(originalPasswordStr, pathStr, upperSt
     const layerHkdfSalt = textEncoder.encode(upperStr);
     const layerHkdfInfo = textEncoder.encode(lowerStr);
 
-    console.log("tempOriginalPasswordBytesView",uint8ArrayToBase64(tempOriginalPasswordBytesView));
-    console.log("layerPbkdfSalt",uint8ArrayToBase64(layerPbkdfSalt));
-    console.log("PBKDF2_ITERATIONS",PBKDF2_ITERATIONS);
-    console.log("pbkdf2OutputKeyLengthBits",pbkdf2OutputKeyLengthBits);
     const baseHkdfKeyForLayer = await pbkdf2DeriveBaseKeyForHkdf(
         tempOriginalPasswordBytesView,
         layerPbkdfSalt,
