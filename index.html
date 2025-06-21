@@ -31,8 +31,23 @@
         <div id="encrypt" class="tab-content active" style="position: relative;">
             <h2>Encrypt Data</h2>
             <div class="form-group">
-                <label for="plaintext">Data to Encrypt:</label>
-                <textarea id="plaintext" rows="3" aria-label="Data to encrypt"></textarea>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <label for="plaintext">Data to Encrypt:</label>
+                    <button type="button" id="showGeneratePasswordModalButton" class="link-style-button">Generate secure
+                        passwords</button>
+                </div>
+                <div style="position: relative;"> <!-- Wrapper for textarea and paste button -->
+                    <textarea id="plaintext" rows="3" aria-label="Data to encrypt"
+                        style="width: 100%; box-sizing: border-box; padding-right: 40px; padding-bottom: 30px;"></textarea>
+                    <button id="pastePlaintextButton" title="Paste" aria-label="Paste into Data to Encrypt"
+                        style="position: absolute; bottom: 8px; right: 8px; background-color: transparent; border: none; padding: 0.375rem; cursor: pointer; color: #4B5563; border-radius: 0.25rem; line-height: 0; z-index: 5;">
+                        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20"
+                            viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M19 2h-4.18C14.4.84 13.3 0 12 0S9.6.84 9.18 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7-.25c.41 0 .75.34.75.75s-.34.75-.75.75-.75-.34-.75-.75.34-.75.75-.75zM12 15l-4-4h2.5V7h3v4H16l-4 4z" />
+                        </svg>
+                    </button>
+                </div>
             </div>
             <div class="form-group">
                 <label for="passwordEncrypt">Password for Encryption:</label>
@@ -79,7 +94,17 @@
             <h2>Decrypt Data</h2>
             <div class="form-group">
                 <label for="ciphertextInput">Ciphertext (Base64):</label>
-                <textarea id="ciphertextInput" rows="5" aria-label="Ciphertext in Base64 to decrypt"></textarea>
+                <div style="position: relative;">
+                    <textarea id="ciphertextInput" rows="5" aria-label="Ciphertext in Base64 to decrypt"></textarea>
+                    <button id="pasteCiphertextButton" title="Paste" aria-label="Paste into Data to Decrypt"
+                        style="position: absolute; bottom: 8px; right: 28px; background-color: transparent; border: none; padding: 0.375rem; cursor: pointer; color: #4B5563; border-radius: 0.25rem; line-height: 0; z-index: 5;">
+                        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20"
+                            viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M19 2h-4.18C14.4.84 13.3 0 12 0S9.6.84 9.18 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7-.25c.41 0 .75.34.75.75s-.34.75-.75.75-.75-.34-.75-.75.34-.75.75-.75zM12 15l-4-4h2.5V7h3v4H16l-4 4z" />
+                        </svg>
+                    </button>
+                </div>
             </div>
             <div class="form-group">
                 <label for="passwordDecrypt">Password (used for encryption):</label>
@@ -125,6 +150,22 @@
         </div>
         <div id="errorDisplay" class="error-message" style="display: none;"></div>
     </div>
+
+    <!-- Password Generator Modal -->
+    <div id="passwordGeneratorModal" class="modal" style="display: none;" role="dialog" aria-modal="true"
+        aria-labelledby="passwordModalTitle">
+        <div class="modal-content">
+            <span class="modal-close-button" id="closePasswordModalButton" title="Close"
+                aria-label="Close">&times;</span>
+            <h3 id="passwordModalTitle">选择密码强度</h3>
+            <div class="modal-options">
+                <button type="button" class="modal-option-button" data-length="8">弱密码 (8位)</button>
+                <button type="button" class="modal-option-button" data-length="14">中等强度 (14位)</button>
+                <button type="button" class="modal-option-button" data-length="18">强密码 (18位)</button>
+            </div>
+        </div>
+    </div>
+
 
     <script type="module" src="index.js"></script>
 </body>

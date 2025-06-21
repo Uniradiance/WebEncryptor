@@ -23,8 +23,9 @@ const Cell = ({ cellData, onInteractionStart, onPointerEnter }) => {
   };
 
   const combinedStyle = {
-    width: '4rem', 
-    height: '4rem', 
+    width: '100%', // Fill grid cell area
+    height: '100%', // Fill grid cell area
+    // aspectRatio: '1 / 1', // Ensure cell itself is square if parent grid cell isn't perfectly square
     border: `1px solid ${BORDER_COLOR_VALUE}`,
     display: 'flex',
     alignItems: 'center',
@@ -33,6 +34,7 @@ const Cell = ({ cellData, onInteractionStart, onPointerEnter }) => {
     userSelect: 'none', 
     touchAction: 'none', 
     transition: 'background-color 0.15s', 
+    boxSizing: 'border-box', // Include border and padding in the element's total width and height
     ...cellStyleFromMap, 
   };
 

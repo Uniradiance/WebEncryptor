@@ -25,6 +25,14 @@ const passwordDecryptInput = getElement('passwordDecrypt');
 const decryptButton = getElement('decryptButton');
 const plaintextOutput = getElement('plaintextOutput');
 
+// Generate Passworld Elements
+const showGeneratePasswordModalButton = document.getElementById('showGeneratePasswordModalButton');
+const passwordGeneratorModal = document.getElementById('passwordGeneratorModal');
+const closePasswordModalButton = document.getElementById('closePasswordModalButton');
+const modalOptionButtons = document.querySelectorAll('.modal-option-button');
+const pastePlaintextButton = document.getElementById('pastePlaintextButton');
+const pasteCiphertextButton = document.getElementById('pasteCiphertextButton');
+
 // UI State Elements
 const loadingIndicator = getElement('loadingIndicator');
 const errorDisplay = getElement('errorDisplay');
@@ -183,6 +191,32 @@ function handleVerifyResponse(data) {
     }
 }
 
+function generateRandomPassword(length, includeSymbols = true) {
+    // 定义字符集
+    const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+    const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const numbers = '0123456789';
+    const symbols = '^*_+-=.<>';
+
+    // 组合基础字符集
+    let charset = lowercase + uppercase + numbers;
+    if (includeSymbols) charset += symbols;
+
+    // 创建随机值数组
+    const randomValues = new Uint32Array(length);
+    crypto.getRandomValues(randomValues);
+
+    // 生成密码
+    let password = '';
+    for (let i = 0; i < length; i++) {
+        // 确保均匀分布：使用浮点数映射避免取模偏差
+        const rand = randomValues[i] / (0xFFFFFFFF + 1);
+        const index = Math.floor(rand * charset.length);
+        password += charset[index];
+    }
+
+    return password;
+}
 
 function initializeWorker() {
     if (window.Worker) {
@@ -349,6 +383,66 @@ copyCiphertextButton.addEventListener('click', async () => {
         displayError('Failed to copy ciphertext. Check console for details.');
     }
 });
+
+showGeneratePasswordModalButton.addEventListener('click', () => {
+    passwordGeneratorModal.style.display = 'flex';
+});
+
+closePasswordModalButton.addEventListener('click', () => {
+    passwordGeneratorModal.style.display = 'none';
+});
+
+window.addEventListener('click', (event) => {
+    if (event.target === passwordGeneratorModal) {
+        passwordGeneratorModal.style.display = 'none';
+    }
+});
+
+modalOptionButtons.forEach(button => {
+    button.addEventListener('click', () => {
+        const length = parseInt(button.dataset.length || "14", 10);
+        plaintextInput.value = generateRandomPassword(length);
+        passwordGeneratorModal.style.display = 'none';
+        plaintextInput.focus(); // Focus on the input after setting password
+    });
+});
+
+pastePlaintextButton.addEventListener('click', () => {
+    getClipboardText().then(text => {
+        if (text) {
+            plaintextInput.value = text;
+            plaintextInput.focus();
+        }
+    });
+});
+
+pasteCiphertextButton.addEventListener('click', () => {
+    getClipboardText().then(text => {
+        if (text) {
+            ciphertextInput.value = text;
+            ciphertextInput.focus();
+        }
+    });
+});
+
+async function getClipboardText() {
+    try {
+        if (!navigator.clipboard) {
+            alert('Clipboard API not available in this browser or context (e.g. HTTP).');
+            return;
+        }
+        const text = await navigator.clipboard.readText();
+        if (text) {
+            return text;
+        } else {
+            // alert('Clipboard is empty.'); // Optional: notify if clipboard is empty
+        }
+    } catch (err) {
+        console.error('Failed to read clipboard contents: ', err);
+        //  Error display logic is assumed to be handled elsewhere or can be added here
+        displayError(`Could not paste from clipboard: ${err.message}. Make sure you've granted permission.`);
+    }
+}
 
 tabs.forEach(tab => {
     tab.addEventListener('click', () => {
