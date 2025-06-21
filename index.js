@@ -33,6 +33,11 @@ const modalOptionButtons = document.querySelectorAll('.modal-option-button');
 const pastePlaintextButton = document.getElementById('pastePlaintextButton');
 const pasteCiphertextButton = document.getElementById('pasteCiphertextButton');
 
+const passwordRetypeDialog = document.getElementById('passwordRetypeDialog');
+const closePasswordRetypeButton = document.getElementById('closePasswordRetypeButton');
+const passwordRetypeInput = document.getElementById('passwordRetypeInput');
+const confirmPasswordRetypeButton = document.getElementById('confirmPasswordRetypeButton');
+
 // UI State Elements
 const loadingIndicator = getElement('loadingIndicator');
 const errorDisplay = getElement('errorDisplay');
@@ -137,35 +142,8 @@ function getChessboardData(boardId, type, isUpperHalf = false) {
 function handleEncryptResponse(data) {
     if (data.status === 'success') {
         const encryptedData = data.result;
-
-        try {
-            // Parameters for verification from the DECRYPT tab
-            const passwordForVerify = passwordEncryptInput.value;
-            const ruleForVerify = ruleEncryptInput.value;
-            const pathForVerify = getChessboardData('decryptBoard', 'full');
-            const upperForVerify = getChessboardData('decryptBoard', 'half', true);
-            const lowerForVerify = getChessboardData('decryptBoard', 'half', false);
-
-            ciphertextOutput.innerText = encryptedData; // Show encrypted data
-            if (!passwordForVerify || !ruleForVerify) {
-                resetUIState('Encryption Succeeded. Auto-validation skipped: Missing Password or Nesting Rule on Decrypt tab.');
-                return;
-            }
-            startProcessing('Validating encryption...');
-            cryptoWorker.postMessage({
-                action: 'verify',
-                ciphertext: encryptedData,
-                password: passwordForVerify,
-                passwordTransformRuleJs: ruleForVerify,
-                path: pathForVerify,
-                upper: upperForVerify,
-                lower: lowerForVerify
-            });
-
-        } catch (err) { // Error getting chessboard data for verification or other setup issues
-            ciphertextOutput.innerText = encryptedData; // Show encrypted data if validation setup fails
-            resetUIState(`Encryption Succeeded. Auto-validation skipped: ${err.message}. Ensure Decrypt tab is correctly configured.`);
-        }
+        ciphertextOutput.innerText = encryptedData; // Show encrypted data
+        passwordRetypeDialog.style.display = 'flex';
     } else { // Encryption failed
         ciphertextOutput.innerText = '';
         resetUIState(`Encryption failed: ${data.error}`);
@@ -184,6 +162,13 @@ function handleUserDecryptResponse(data) {
 
 function handleVerifyResponse(data) {
     if (data.status === 'success') {
+        loadingIndicator.textContent = "Verification successful.";
+        loadingIndicator.style.display = 'block';
+        setTimeout(() => {
+            if (loadingIndicator.textContent === "Verification successful.") {
+                loadingIndicator.style.display = 'none';
+            }
+        }, 1500);
         resetUIState();
     } else { // Verification (decryption step inside worker) failed
         ciphertextOutput.innerText = '';
@@ -443,6 +428,51 @@ async function getClipboardText() {
         displayError(`Could not paste from clipboard: ${err.message}. Make sure you've granted permission.`);
     }
 }
+
+confirmPasswordRetypeButton.addEventListener('click', () => {
+    // 点击确认时执行验证逻辑
+    try {
+        // Parameters for verification from the DECRYPT tab
+        passwordRetypeDialog.style.display = 'none';
+
+        const encryptedData = ciphertextOutput.innerText;
+
+        const passwordForVerify = passwordRetypeInput.value;
+        const ruleForVerify = ruleEncryptInput.value;
+        const pathForVerify = getChessboardData('decryptBoard', 'full');
+        const upperForVerify = getChessboardData('decryptBoard', 'half', true);
+        const lowerForVerify = getChessboardData('decryptBoard', 'half', false);
+
+        if (!passwordForVerify || !ruleForVerify) {
+            resetUIState('Encryption Succeeded. Auto-validation skipped: Missing Password or Nesting Rule on Decrypt tab.');
+            return;
+        }
+        startProcessing('Validating encryption...');
+        cryptoWorker.postMessage({
+            action: 'verify',
+            ciphertext: encryptedData,
+            password: passwordForVerify,
+            passwordTransformRuleJs: ruleForVerify,
+            path: pathForVerify,
+            upper: upperForVerify,
+            lower: lowerForVerify
+        });
+
+        passwordRetypeInput.value = '';
+
+    } catch (err) { // Error getting chessboard data for verification or other setup issues
+        ciphertextOutput.innerText = encryptedData; // Show encrypted data if validation setup fails
+        resetUIState(`Encryption Succeeded. Auto-validation skipped: ${err.message}. Ensure Decrypt tab is correctly configured.`);
+    }
+});
+
+closePasswordRetypeButton.addEventListener('click', () => {
+    passwordRetypeDialog.style.display = 'none';
+    passwordRetypeInput.value = '';
+    passwordRetypeError.style.display = 'none';
+    passwordRetypeError.textContent = '';
+    // isPasswordConfirmed remains false, user needs to re-trigger confirmation.
+});
 
 tabs.forEach(tab => {
     tab.addEventListener('click', () => {

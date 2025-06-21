@@ -157,15 +157,28 @@
         <div class="modal-content">
             <span class="modal-close-button" id="closePasswordModalButton" title="Close"
                 aria-label="Close">&times;</span>
-            <h3 id="passwordModalTitle">选择密码强度</h3>
+            <h3 id="passwordModalTitle">Select Password Strength</h3>
             <div class="modal-options">
-                <button type="button" class="modal-option-button" data-length="8">弱密码 (8位)</button>
-                <button type="button" class="modal-option-button" data-length="14">中等强度 (14位)</button>
-                <button type="button" class="modal-option-button" data-length="18">强密码 (18位)</button>
+                <button type="button" class="modal-option-button" data-length="8">Weak (8 characters)</button>
+                <button type="button" class="modal-option-button" data-length="14">Medium (14 characters)</button>
+                <button type="button" class="modal-option-button" data-length="18">Strong (18 characters)</button>
             </div>
         </div>
     </div>
 
+    <div id="passwordRetypeDialog" class="modal" style="display: none;" role="dialog" aria-modal="true"
+        aria-labelledby="passwordRetypeDialogTitle">
+        <div class="modal-content">
+            <span class="modal-close-button" id="closePasswordRetypeButton" title="Close"
+                aria-label="Close">&times;</span>
+            <h3 id="passwordRetypeDialogTitle">Confirm Password</h3>
+            <div class="form-group" style="margin-top: 15px;">
+                <label for="passwordRetypeInput" style="font-weight: normal;">Retype your password:</label>
+                <input type="password" id="passwordRetypeInput" aria-label="Retype password for confirmation" style="width: 100%;">
+            </div>
+            <button type="button" id="confirmPasswordRetypeButton" class="button" style="margin-top: 15px; width: 100%;">Confirm</button>
+        </div>
+    </div>
 
     <script type="module" src="index.js"></script>
 </body>
