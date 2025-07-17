@@ -76,17 +76,21 @@ async function pbkdf2DeriveBaseKeyForHkdf(passwordBytes, saltBytes, iterations, 
 }
 
 async function hkdfDeriveKeyAndIv(baseHkdfKey, saltBytes, infoBytes, keyLen, ivLen) {
-    const totalLengthBytes = keyLen + ivLen;
-    const derivedBytesArrayBuffer = await crypto.subtle.deriveBits(
+    // 只派生 key
+    const derivedKeyArrayBuffer = await crypto.subtle.deriveBits(
         { name: "HKDF", hash: "SHA-256", salt: saltBytes, info: infoBytes },
         baseHkdfKey,
-        totalLengthBytes * 8
+        keyLen * 8
     );
-    const derivedBytes = new Uint8Array(derivedBytesArrayBuffer);
-    const key = derivedBytes.slice(0, keyLen);
-    const iv = derivedBytes.slice(keyLen, totalLengthBytes);
-    // Securely clear sensitive data
-    derivedBytes.fill(0);
+    const key = new Uint8Array(derivedKeyArrayBuffer);
+
+    // iv 通过安全随机生成
+    const iv = new Uint8Array(ivLen);
+    crypto.getRandomValues(iv);
+
+    // 清理敏感数据
+    key.fill(0);
+
     return { key, iv };
 }
 
