@@ -88,8 +88,6 @@ async function hkdfDeriveKeyAndIv(baseHkdfKey, saltBytes, infoBytes, keyLen, ivL
     const iv = new Uint8Array(ivLen);
     crypto.getRandomValues(iv);
 
-    // 清理敏感数据
-    key.fill(0);
     derivedBytes.fill(0);
     return { key, iv };
 }
