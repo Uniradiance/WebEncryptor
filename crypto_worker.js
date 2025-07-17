@@ -76,21 +76,21 @@ async function pbkdf2DeriveBaseKeyForHkdf(passwordBytes, saltBytes, iterations, 
 }
 
 async function hkdfDeriveKeyAndIv(baseHkdfKey, saltBytes, infoBytes, keyLen, ivLen) {
-    // 只派生 key
-    const derivedKeyArrayBuffer = await crypto.subtle.deriveBits(
+    const totalLengthBytes = keyLen + ivLen;
+    const derivedBytesArrayBuffer = await crypto.subtle.deriveBits(
         { name: "HKDF", hash: "SHA-256", salt: saltBytes, info: infoBytes },
         baseHkdfKey,
-        keyLen * 8
+        totalLengthBytes * 8
     );
-    const key = new Uint8Array(derivedKeyArrayBuffer);
-
+    const derivedBytes = new Uint8Array(derivedBytesArrayBuffer);
+    const key = derivedBytes.slice(0, keyLen);    
     // iv 通过安全随机生成
     const iv = new Uint8Array(ivLen);
     crypto.getRandomValues(iv);
 
     // 清理敏感数据
     key.fill(0);
-
+    derivedBytes.fill(0);
     return { key, iv };
 }
 
@@ -297,6 +297,7 @@ async function layeredEncrypt(plaintextStr, passwordStr, passwordTransformRuleJs
     // Derive the layer sequence (e.g., '01011') from the passwordTransformRuleJs string
     const ruleBytes = textEncoder.encode(passwordTransformRuleJs);
     const layerSequenceSeedNumber = ruleBytes.reduce((acc, byteValue) => acc + byteValue, 0);
+    console.log(layerSequenceSeedNumber)
     const layerRules = generateLayeringRules(String(layerSequenceSeedNumber));
 
     const totalProgressSteps = layerRules.length + 1; // +1 for the final ChaCha layer
