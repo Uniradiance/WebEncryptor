@@ -1,6 +1,7 @@
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 import ssl
 import argparse
+import webbrowser
 from gen_key import generate_certificate
 
 # 生成自签名证书（如果没有）
@@ -36,8 +37,12 @@ options:
 
         server = HTTPServer(('0.0.0.0', 443), SimpleHTTPRequestHandler)
         server.socket = context.wrap_socket(server.socket, server_side=True)
-        print("HTTPS server running on https:/127.0.0.1:443")
+        print("HTTPS server running on https://127.0.0.1:443")
+        
+        # 打开默认浏览器访问网站
+        webbrowser.open("https://127.0.0.1:443")
         server.serve_forever()
+
 
     except IOError:
         print(f"Unable to read the cert file.\n")
