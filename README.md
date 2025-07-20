@@ -1,6 +1,6 @@
 # 这是一个离线的web加密软件
 特点是通过ChaCha20-Poly1305和AES-GCM混合加密，造就了一个加密复杂解密也复杂的加密软件。安全性属于ChaCha20-Poly1305的安全性加AES-GCM的安全性再加1。
-虽然想在浏览器跑，但是web crypto api不让，让这个软件意义降低了一半，好在用python http.server部署也简单。
+虽然想在浏览器跑，但是web crypto api不让，让这个软件意义降低了一半，不过我用python做了个简单的部署程序。
 
 ## 加密规则
 1. 基础密码（Password for Encryption）： 加解密用到的密码，所有的加密key都是它诞生的。
@@ -23,7 +23,7 @@
 # This is an Offline Web Encryption Software
 It features hybrid encryption using ChaCha20-Poly1305 and AES-GCM, creating a tool that is complex to both encrypt and decrypt. Its security level equals the combined security of ChaCha20-Poly1305 plus AES-GCM, plus an additional margin of safety.
 
-Although intended to run in browsers, restrictions of the Web Crypto API reduce its utility by half. Fortunately, deployment using python http.server is straightforward.
+Although intended to run in browsers, restrictions of the Web Crypto API reduce its utility by half. Fortunately, I made a simple deployment program in python.
 
 ## Encryption Rules
 1. Base Password (Password for Encryption): The password used for all encryption/decryption. All cryptographic keys derive from this.
