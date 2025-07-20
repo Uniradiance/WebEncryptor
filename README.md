@@ -11,9 +11,9 @@
 在加密也有生成密码选项，可生成8、14、18位随机密码。
 
 # 部署
+- 现在已经有了发行版，直接运行`httpserver.exe`之后可以直接在浏览器中访问`https://127.0.0.1/`。
 - https（可以局域网访问）
-需要先生成证书:`openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes`,然后安装python http.server
-然后点击StartServer.bat
+需要先生成证书:`openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes`。然后点击StartServer.bat
 - http（只能访问localhost）
 直接运行python命令`python -m http.server 80`
 
@@ -27,25 +27,16 @@ Although intended to run in browsers, restrictions of the Web Crypto API reduce 
 
 ## Encryption Rules
 1. Base Password (Password for Encryption): The password used for all encryption/decryption. All cryptographic keys derive from this.
-
 2. Rule: A function used to obfuscate the base password. Takes parameters byte (original password byte) and i (current encryption round index). Example: (byte ^ (i ^ 123)) & 255. The final & 255 must be included to prevent exceptions.
-
 3. Chessboard (Interactive Color Grid - Path): Data used to obfuscate the password, derived from click sequence, top-half colors, and bottom-half colors. The click sequence must be consistent during both encryption and decryption, and both color sections must contain content.
 
 ## Generate Password
 The encryption interface includes an option to generate random 8, 14, or 18-character passwords.
 
 ## Deployment
-HTTPS (Accessible on LAN):
-
-First generate certificates:`openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes`
-
-Install python http.server.
-
-Run StartServer.bat.
-
-HTTP (Localhost access only):
-Run the Python command directly:`python -m http.server 80`
+- Now that there is a distribution, you can access the 'https://127.0.0.1/' directly in the browser after running 'httpserver.exe' directly.
+- HTTPS (Accessible on LAN): First generate certificates:`openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes`. Run StartServer.bat.
+- HTTP (Localhost access only): Run the Python command directly:`python -m http.server 80`
 
 # Statement
 This project was essentially written by AI; I was only responsible for the copy-pasting.
