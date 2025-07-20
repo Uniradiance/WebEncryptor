@@ -1,5 +1,6 @@
 build/
 dist/
+__pycache__/
 cert.pem
 key.pem
 httpServer.spec
