@@ -1,0 +1,7 @@
+build/
+dist/
+cert.pem
+key.pem
+httpServer.spec
+httpServer.exe
+WebEncryptor.zip
