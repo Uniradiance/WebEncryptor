@@ -73,8 +73,15 @@ h2 {
 }
 
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .form-group {
@@ -119,6 +126,7 @@ h2 {
     font-size: 0.8em;
     color: #777;
 }
+
 .form-group small code {
     background-color: #e8e8e8;
     padding: 2px 4px;
@@ -157,6 +165,7 @@ h2 {
 .secondary-button {
     background-color: #95a5a6;
 }
+
 .secondary-button:hover {
     background-color: #7f8c8d;
 }
@@ -191,23 +200,30 @@ h2 {
 
 .progress-bar-container {
     width: 100%;
-    background-color: #e9ecef; /* Light gray, blends with light backgrounds */
+    background-color: #e9ecef;
+    /* Light gray, blends with light backgrounds */
     border-radius: 8px;
     margin-top: 15px;
     margin-bottom: 15px;
     padding: 4px;
-    box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
-    height: 28px; /* Slightly taller for text */
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+    height: 28px;
+    /* Slightly taller for text */
     box-sizing: border-box;
-    position: relative; /* For absolute positioning of text */
-    overflow: hidden; /* Ensures inner bar radius is neat */
+    position: relative;
+    /* For absolute positioning of text */
+    overflow: hidden;
+    /* Ensures inner bar radius is neat */
 }
 
 .progress-bar {
     height: 100%;
-    width: 0%; /* Start at 0% */
-    background-color: #3498db; /* Active color */
-    border-radius: 5px; /* Slightly less than container for padding effect */
+    width: 0%;
+    /* Start at 0% */
+    background-color: #3498db;
+    /* Active color */
+    border-radius: 5px;
+    /* Slightly less than container for padding effect */
     transition: width 0.2s ease-out;
     display: flex;
     align-items: center;
@@ -222,10 +238,13 @@ h2 {
     transform: translateY(-50%);
     text-align: center;
     font-size: 0.85em;
-    color: #ffffff; /* White text on blue bar */
+    color: #ffffff;
+    /* White text on blue bar */
     font-weight: bold;
-    z-index: 1; /* Ensure text is above the bar */
-    text-shadow: 1px 1px 1px rgba(0,0,0,0.2); /* Slight shadow for readability */
+    z-index: 1;
+    /* Ensure text is above the bar */
+    text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.2);
+    /* Slight shadow for readability */
 }
 
 .link-style-button {
@@ -235,27 +254,31 @@ h2 {
     text-decoration: underline;
     cursor: pointer;
     padding: 0;
-    font-size: 0.9em; /* Smaller, link-like */
-    font-weight: normal; /* Links usually aren't bold by default */
+    font-size: 0.9em;
+    /* Smaller, link-like */
+    font-weight: normal;
+    /* Links usually aren't bold by default */
     vertical-align: baseline;
     margin-top: -4px;
 }
+
 .link-style-button:hover {
     color: #2980b9;
-    text-decoration: none; /* Optional: remove underline on hover */
+    text-decoration: none;
+    /* Optional: remove underline on hover */
 }
 
 /* Modal Styles */
 .modal {
-    display: none; 
-    position: fixed; 
-    z-index: 1000; 
+    display: none;
+    position: fixed;
+    z-index: 1000;
     left: 0;
     top: 0;
-    width: 100%; 
-    height: 100%; 
-    overflow: auto; 
-    background-color: rgba(0,0,0,0.6); 
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0, 0, 0, 0.6);
     /* padding-top: 60px; REMOVED */
     /* ADDED for flex centering */
     align-items: center;
@@ -264,19 +287,26 @@ h2 {
 }
 
 @keyframes fadeInModal {
-  from { opacity: 0; transform: translateY(-20px); }
-  to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .modal-content {
     background-color: #fefefe;
-    margin: 5% auto; 
+    margin: 5% auto;
     padding: 25px;
     border: 1px solid #ddd;
-    width: 90%; 
-    max-width: 450px; 
+    width: 90%;
+    max-width: 450px;
     border-radius: 8px;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
     position: relative;
     text-align: center;
 }
@@ -326,6 +356,7 @@ h2 {
 .modal-option-button:hover {
     background-color: #2980b9;
 }
+
 .modal-option-button:active {
     transform: translateY(1px);
 }
@@ -352,18 +383,240 @@ h2 {
         width: 100%;
         box-sizing: border-box;
     }
+
     .output-group .button {
         margin-top: 10px;
     }
+
     .modal-content {
         width: 95%;
         padding: 20px;
     }
+
     .modal h3 {
         font-size: 1.2em;
     }
+
     .modal-option-button {
         padding: 10px 15px;
         font-size: 0.95em;
     }
+}
+
+/* Password Manager Styles */
+:root {
+    --primary-color: #3498db;
+    --primary-hover-color: #2980b9;
+    --border-color: #ddd;
+    --shadow-color: rgba(0, 0, 0, 0.1);
+    --label-color: #555;
+}
+
+.pm-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #eee;
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+}
+
+.pm-header h2 {
+    color: #2c3e50;
+    margin: 0;
+    font-size: 1.6em;
+    border-bottom: none;
+    /* Override general h2 style */
+}
+
+#password-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+    min-height: 50px;
+}
+
+.pm-card {
+    background-color: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 5px var(--shadow-color);
+    position: relative;
+    transition: box-shadow 0.3s ease, transform 0.3s ease, max-height 0.5s ease-in-out;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.pm-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+}
+
+.pm-card-content {
+    flex-grow: 1;
+    padding-bottom: 40px;
+}
+
+.pm-card h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #34495e;
+    word-break: break-all;
+}
+
+.pm-card p {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #7f8c8d;
+    word-break: break-all;
+    white-space: pre-wrap;
+    font-size: 0.9em;
+}
+
+.pm-card-actions {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    display: flex;
+    gap: 8px;
+}
+
+.pm-card .view-mode {
+    display: block;
+}
+
+.pm-card .edit-mode {
+    display: none;
+}
+
+.pm-card.editing .view-mode {
+    display: none;
+}
+
+.pm-card.editing .edit-mode {
+    display: block;
+}
+
+.pm-button {
+    display: inline-block;
+    background-color: var(--primary-color);
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.95em;
+    font-weight: bold;
+    transition: background-color 0.3s ease, transform 0.1s ease;
+    text-align: center;
+}
+
+.pm-button:hover {
+    background-color: var(--primary-hover-color);
+}
+
+.pm-button:active {
+    transform: translateY(1px);
+}
+
+.pm-icon-button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 5px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+}
+
+.pm-icon-button:hover {
+    background-color: #f0f0f0;
+}
+
+.pm-icon-button svg {
+    width: 20px;
+    height: 20px;
+    fill: #555;
+}
+
+.pm-form-group {
+    margin-bottom: 15px;
+}
+
+.pm-form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    font-size: 0.85em;
+    color: var(--label-color);
+}
+
+.pm-form-group input,
+.pm-form-group textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    font-size: 0.9em;
+    box-sizing: border-box;
+}
+
+.pm-form-group textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+/* Password Manager Card Edit/View State */
+.pm-card .save-btn,
+.pm-card .cancel-btn {
+    display: none;
+}
+
+.pm-card.editing .save-btn,
+.pm-card.editing .cancel-btn {
+    display: flex;
+}
+
+.pm-card.editing .edit-btn,
+.pm-card.editing .use-for-decrypt-btn,
+.pm-card.editing .delete-btn {
+    display: none;
+}
+
+.popup-menu {
+    display: none;
+    /* Hidden by default */
+    position: absolute;
+    right: 0;
+    top: 100%;
+    /* Position it below the button */
+    background-color: white;
+    border: 1px solid #ccc;
+    border-radius: 0.375rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    z-index: 100;
+    min-width: 150px;
+    list-style: none;
+    padding: 0.5rem 0;
+    margin-top: 0.25rem;
+}
+
+.popup-menu-item {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 1rem;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: #1F2937;
+}
+
+.popup-menu-item:hover {
+    background-color: #f3f4f6;
 }

@@ -1,7 +1,9 @@
 
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.js'; // Ensure .js extension
+import { passwordService } from './password_service.js';
 
 const getElement = (id) => {
     const el = document.getElementById(id);
@@ -17,6 +19,7 @@ const ChessboardEncryptInput = getElement('ChessboardEncrypt');
 const encryptButton = getElement('encryptButton');
 const ciphertextOutput = getElement('ciphertextOutput');
 const copyCiphertextButton = getElement('copyCiphertextButton');
+const saveToManagerButton = getElement('saveToManagerButton');
 
 const ciphertextInput = getElement('ciphertextInput');
 const ruleDecryptInput = getElement('RuleDecrypt');
@@ -47,6 +50,11 @@ const progressText = getElement('progressText');
 
 const tabs = document.querySelectorAll('.tab-button');
 const tabContents = document.querySelectorAll('.tab-content');
+
+// Menu
+const moreOptionsBtn = document.getElementById('moreOptionsButton');
+const moreOptionsMenu = document.getElementById('moreOptionsMenu');
+const shutdownButton = document.getElementById('shutdownButton');
 
 let cryptoWorker = null;
 
@@ -369,6 +377,37 @@ copyCiphertextButton.addEventListener('click', async () => {
     }
 });
 
+saveToManagerButton.addEventListener('click', () => {
+    const ciphertext = ciphertextOutput.innerText;
+    if (!ciphertext) {
+        displayError('No ciphertext to save.');
+        setTimeout(() => { if (errorDisplay.textContent === 'No ciphertext to save.') clearError(); }, 2000);
+        return;
+    }
+
+    try {
+        const newPasswordEntry = {
+            name: `Encrypted Data (${new Date().toLocaleDateString()})`,
+            description: 'Saved from the Encrypt tab.',
+            password: ciphertext
+        };
+
+        passwordService.addPassword(newPasswordEntry);
+
+        loadingIndicator.textContent = "Saved to Password Manager!";
+        loadingIndicator.style.display = 'block';
+        setTimeout(() => {
+            if (loadingIndicator.textContent === "Saved to Password Manager!") {
+                loadingIndicator.style.display = 'none';
+            }
+        }, 2000);
+
+    } catch (err) {
+        console.error('Failed to save to Password Manager: ', err);
+        displayError('Failed to save to Password Manager. Check console for details.');
+    }
+});
+
 showGeneratePasswordModalButton.addEventListener('click', () => {
     passwordGeneratorModal.style.display = 'flex';
 });
@@ -380,6 +419,10 @@ closePasswordModalButton.addEventListener('click', () => {
 window.addEventListener('click', (event) => {
     if (event.target === passwordGeneratorModal) {
         passwordGeneratorModal.style.display = 'none';
+    }
+    if (moreOptionsMenu.style.display === 'block') {
+        moreOptionsMenu.style.display = 'none';
+        moreOptionsBtn.setAttribute('aria-expanded', 'false');
     }
 });
 
@@ -408,6 +451,22 @@ pasteCiphertextButton.addEventListener('click', () => {
             ciphertextInput.focus();
         }
     });
+});
+
+moreOptionsBtn.addEventListener('click', (event) => {
+    event.stopPropagation(); // Prevents the window click event from firing immediately
+    const isExpanded = moreOptionsBtn.getAttribute('aria-expanded') === 'true';
+    moreOptionsMenu.style.display = isExpanded ? 'none' : 'block';
+    moreOptionsBtn.setAttribute('aria-expanded', !isExpanded);
+});
+
+// Shutdown functionality
+shutdownButton.addEventListener('click', () => {
+    // Hide the menu first
+    moreOptionsMenu.style.display = 'none';
+    moreOptionsBtn.setAttribute('aria-expanded', 'false');
+    resetUIState('Warning: The server is currently shut down.')
+    passwordService.shutdown();
 });
 
 async function getClipboardText() {
@@ -469,27 +528,38 @@ confirmPasswordRetypeButton.addEventListener('click', () => {
 closePasswordRetypeButton.addEventListener('click', () => {
     passwordRetypeDialog.style.display = 'none';
     passwordRetypeInput.value = '';
-    passwordRetypeError.style.display = 'none';
-    passwordRetypeError.textContent = '';
     // isPasswordConfirmed remains false, user needs to re-trigger confirmation.
 });
 
+function switchToTab(tabId) {
+    tabs.forEach(t => {
+        if (t.dataset.tab === tabId) {
+            t.classList.add('active');
+        } else {
+            t.classList.remove('active');
+        }
+    });
+
+    tabContents.forEach(content => {
+        if (content.id === tabId) {
+            content.classList.add('active');
+        } else {
+            content.classList.remove('active');
+        }
+    });
+    // Reset UI state when switching tabs
+    resetUIState();
+    ciphertextOutput.innerText = '';
+    plaintextOutput.innerText = '';
+}
+// Expose it to global scope for other modules
+window.switchToTab = switchToTab;
+
+
 tabs.forEach(tab => {
     tab.addEventListener('click', () => {
-        tabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-
         const targetTabContentId = tab.getAttribute('data-tab');
-        tabContents.forEach(content => {
-            content.classList.remove('active');
-            if (content.id === targetTabContentId) {
-                content.classList.add('active');
-            }
-        });
-        // Reset UI state when switching tabs
-        resetUIState();
-        ciphertextOutput.innerText = '';
-        plaintextOutput.innerText = '';
+        switchToTab(targetTabContentId);
     });
 });
 

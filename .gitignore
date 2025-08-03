@@ -6,3 +6,5 @@ key.pem
 httpServer.spec
 httpServer.exe
 WebEncryptor.zip
+passwords.json
+server.log
