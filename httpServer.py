@@ -22,7 +22,7 @@ next_id = 1
 
 def load_database():
     """服务器启动时从文件加载数据库"""
-    global passwords_db, next_id, DB_FILE
+    global passwords_db, next_id
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f:
@@ -36,7 +36,6 @@ def load_database():
                 next_id = max_id + 1
             else:
                 next_id = 1
-            DB_FILE = os.path.abspath(DB_FILE)
             print(f"成功从 '{DB_FILE}' 加载 {len(passwords_db)} 条密码数据。")
         except (json.JSONDecodeError, TypeError):
             print(f"错误: 无法解析 '{DB_FILE}'。将使用空数据库启动。")
@@ -219,6 +218,8 @@ if __name__ == '__main__':
         print("\n证书生成成功。服务器即将启动。")
 
     # --- Step 3: Load Database and Start Server ---
+    
+    DB_FILE = os.path.abspath(DB_FILE)
     load_database()
     
     try:
