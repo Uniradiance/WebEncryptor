@@ -182,6 +182,8 @@ if __name__ == '__main__':
     )
     # 服务器相关参数
     parser.add_argument('--hide-console', action='store_true', help='成功启动后隐藏控制台窗口 (仅限Windows)')
+    # 日志
+    parser.add_argument('--debug', action='store_true', default=False, help='保存日志到文件')
     
     # 证书生成相关参数
     cert_group = parser.add_argument_group('Certificate Generation Options')
@@ -202,7 +204,7 @@ if __name__ == '__main__':
     certs_exist = os.path.exists('cert.pem') and os.path.exists('key.pem')
 
     # 证书存在时窗口是隐藏地
-    if certs_exist:
+    if certs_exist and args.debug:
         # 这将捕获所有 print 语句和错误
         log_file = 'server.log'
         sys.stdout = open(log_file, 'a', encoding='utf-8')
