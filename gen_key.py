@@ -12,8 +12,8 @@ def generate_certificate(args):
     """根据提供的参数生成证书和私钥"""
     
     # --- 固定的参数 (根据你的要求，这些不从终端输入) ---
-    private_key_filename = "key.pem"
-    public_cert_filename = "cert.pem"
+    private_key_filename = "cert/key.pem"
+    public_cert_filename = "cert/cert.pem"
     public_exponent = 65537
     key_size = 2048
     

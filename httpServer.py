@@ -201,7 +201,7 @@ if __name__ == '__main__':
     alloc_console() # 总是先分配一个控制台，以便能看到初始信息或错误
 
     # --- Step 2: Check for Certificates ---
-    certs_exist = os.path.exists('cert.pem') and os.path.exists('key.pem')
+    certs_exist = os.path.exists('cert/cert.pem') and os.path.exists('cert/key.pem')
 
     # 证书存在时窗口是隐藏地
     if certs_exist and args.debug:
@@ -215,6 +215,8 @@ if __name__ == '__main__':
         print("SSL certificate (cert.pem/key.pem) not found.")
         print("正在使用提供的参数或默认值生成证书...")
         
+        if not os.path.exists('cert') and not os.path.isdir('cert'):
+            os.mkdir('cert')
         generate_certificate(args) # 使用解析好的 args
         
         print("\n证书生成成功。服务器即将启动。")
@@ -226,7 +228,7 @@ if __name__ == '__main__':
     
     try:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain('cert.pem', 'key.pem')
+        context.load_cert_chain('cert/cert.pem', 'cert/key.pem')
         
         # 确保我们在脚本所在的目录的 htdocs 子目录中提供服务
         os.chdir('htdocs')
