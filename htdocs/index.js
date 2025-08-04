@@ -569,7 +569,12 @@ function switchToTab(tabId) {
         if (content.id === tabId) {
             content.classList.add('active');
             if (content.id == 'password-manager' & !content.hasAttribute('size')) {
-                content.style.minWidth = `${content.getBoundingClientRect().width <= 640 ? content.getBoundingClientRect().width + 60 : 700}px`;
+                let baseWidth = content.getBoundingClientRect().width + 60;
+                if (baseWidth > content.parentNode.getBoundingClientRect().width) {
+                    baseWidth -= 20;
+                }
+                console.log(baseWidth);
+                content.style.minWidth = `${baseWidth <= 700 ? baseWidth : 700}px`;
                 content.setAttribute('size', true);
             }
         } else {
