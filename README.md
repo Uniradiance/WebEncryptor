@@ -143,8 +143,6 @@ httpServer.exe \
 # 声明
 这个项目基本上是AI写的，我负责复制粘贴。
 
-Here's the translated English version of your README.md:
-
 # Web-Based Text Encryption Software with Password Management
 
 This software uses hybrid encryption with ChaCha20-Poly1305 and AES-GCM, creating a solution where both encryption and decryption processes are complex. The security level combines the security of ChaCha20-Poly1305 plus AES-GCM security plus [1].
