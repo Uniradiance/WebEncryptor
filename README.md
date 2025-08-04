@@ -28,6 +28,8 @@ Windows平台直接运行`httpServer.exe`就会自动打开页面。如果不知
    - 点击Manager右边的 [⫶] 会显示Shutdown，点击即可关闭服务器
    - 这个应用空载运行时只需要16MB+内存，系统消耗很低
 
+---
+
 ### 1. 控制台管理
 ```bash
 --hide-console
