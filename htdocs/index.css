@@ -98,7 +98,7 @@ h2 {
 .form-group input[type="text"],
 .form-group input[type="password"],
 .form-group textarea {
-    width: calc(100% - 20px);
+    width: 100%;
     padding: 12px;
     border: 1px solid #ddd;
     border-radius: 5px;
