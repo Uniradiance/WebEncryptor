@@ -352,6 +352,7 @@ decryptButton.addEventListener('click', () => {
             upper,
             lower,
         });
+        window.reactAppRef.current.shuffleCellColors();
     } catch (err) {
         displayError(`Chessboard error for decryption: ${err.message}`);
     }
@@ -539,27 +540,19 @@ showPassword(toggleRuleDecrypt, ruleDecryptInput);
 
 function showPassword(eyeIcon, Input) {
     // 鼠标按下时显示密码
-    eyeIcon.addEventListener('mousedown', () => {
-        Input.type = 'text';
-    });
-
-    // 鼠标松开时隐藏密码
     eyeIcon.addEventListener('mouseup', () => {
-        Input.type = 'password';
-    });
-
-    // 鼠标移出图标区域时也隐藏密码（防止按住后移出）
-    eyeIcon.addEventListener('mouseleave', () => {
-        Input.type = 'password';
+        Input.type = 'text';
+        Input.focus();
     });
 
     // 触摸开始时显示密码 (移动设备)
-    eyeIcon.addEventListener('touchstart', () => {
+    eyeIcon.addEventListener('touchend', () => {
         Input.type = 'text';
+        Input.focus();
     });
 
-    // 触摸结束时隐藏密码 (移动设备)
-    eyeIcon.addEventListener('touchend', () => {
+    // 输入框失去焦点隐藏密码
+    Input.addEventListener('blur', () => {
         Input.type = 'password';
     });
 }
@@ -590,7 +583,6 @@ function switchToTab(tabId) {
 }
 // Expose it to global scope for other modules
 window.switchToTab = switchToTab;
-
 
 tabs.forEach(tab => {
     tab.addEventListener('click', () => {
