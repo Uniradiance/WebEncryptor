@@ -543,6 +543,10 @@ function switchToTab(tabId) {
     tabContents.forEach(content => {
         if (content.id === tabId) {
             content.classList.add('active');
+            if (content.id == 'password-manager' & !content.hasAttribute('size')) {
+                content.style.minWidth = `${content.getBoundingClientRect().width + 60}px`;
+                content.setAttribute('size', true);
+            }
         } else {
             content.classList.remove('active');
         }
