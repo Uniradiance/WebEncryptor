@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { ROWS, COLS, COL_LABELS, ROW_LABELS } from './constants.js'; // Added .js
+import { ROWS, COLS, COL_LABELS, ROW_LABELS, COLOR_SEQUENCE } from './constants.js'; // Added .js
 import Cell from './Cell.js'; // Added .js
 import { compareCellIds } from './sortUtils.js'; // Added .js
 // Removed: import { CellData, CellColor } from './types';
@@ -55,7 +55,7 @@ const PasteIcon = ({ color = 'currentColor', size = 20 }) => (
 );
 
 const App = () => {
-  const initialCells = () => {
+  const initialCells = useCallback(() => {
     return Array.from({ length: ROWS }, (_, r) =>
       Array.from({ length: COLS }, (_, c) => ({
         id: `${COL_LABELS[c]}${ROW_LABELS[r]}`,
@@ -64,9 +64,10 @@ const App = () => {
         color: null,
       }))
     );
-  };
+  }, []);
 
   const [cells, setCells] = useState(initialCells());
+  const [displayCells, setDisplayCells] = useState(initialCells());
   const [isPressing, setIsPressing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [interactionOriginCell, setInteractionOriginCell] = useState(null);
@@ -91,6 +92,9 @@ const App = () => {
     return remValue * parseFloat(getComputedStyle(document.documentElement).fontSize);
   }, []);
 
+  useEffect(() => {
+    setDisplayCells(cells);
+  }, [cells]);
 
   useEffect(() => {
     const calculateCellSize = () => {
@@ -206,7 +210,7 @@ const App = () => {
     return false;
   }, [isDragging, interactionOriginCell, cells, updateCellColor]);
 
-  const generateFullDataString = () => {
+  const generateFullDataString = useCallback(() => {
     const coloredCells = [];
     cells.flat().forEach(cell => {
       if (cell.color !== null && cell.lastSetTimestamp) {
@@ -216,9 +220,9 @@ const App = () => {
     coloredCells.sort((a, b) => (a.lastSetTimestamp || 0) - (b.lastSetTimestamp || 0));
     const data = coloredCells.map(cell => `${cell.color}${cell.id}`).join('');
     return data;
-  }
+  }, [cells]);
 
-  const generateHalfDataString = (isUpperHalf) => {
+  const generateHalfDataString = useCallback((isUpperHalf) => {
     const targetRows = isUpperHalf ? [0, 1, 2] : [3, 4, 5];
     const halfCells = [];
 
@@ -232,7 +236,21 @@ const App = () => {
     const data = halfCells.map(cell => `${cell.color}${cell.id}`).join('');
 
     return data;
-  }
+  }, [cells]);
+
+  const shuffleCellColors = useCallback(() => {
+    const availableColors = COLOR_SEQUENCE;
+    const newDisplayCells = Array.from({ length: ROWS }, (_, r) =>
+      Array.from({ length: COLS }, (_, c) => ({
+        id: `${COL_LABELS[c]}${ROW_LABELS[r]}`,
+        row: r,
+        col: c,
+        color: availableColors[Math.floor(Math.random() * (availableColors.length - 2) + 1)],
+      }))
+    );
+    setDisplayCells(newDisplayCells);
+  }, []);
+
 
   useEffect(() => {
     const handleGlobalInteractionEnd = (event) => {
@@ -327,6 +345,7 @@ const App = () => {
       getFullData: generateFullDataString,
       getHalfData: generateHalfDataString,
       getCells: () => [...cells],
+      shuffleCellColors: shuffleCellColors,
     };
 
     return () => {
@@ -335,7 +354,7 @@ const App = () => {
       document.removeEventListener('touchcancel', handleGlobalInteractionEnd);
       document.removeEventListener('touchmove', handleDocumentTouchMove);
     };
-  }, [isDragging, interactionOriginCell, nextColorForOriginOrDrag, handlePointerMoveOverCell, updateCellColor, cells, COL_LABELS, ROW_LABELS]);
+  }, [isDragging, interactionOriginCell, nextColorForOriginOrDrag, handlePointerMoveOverCell, updateCellColor, cells, COL_LABELS, ROW_LABELS, generateFullDataString, generateHalfDataString, shuffleCellColors]);
 
   // 使用 useMemo 缓存计算结果，避免不必要的重复计算
   const hasActiveCells = useMemo(() => {
@@ -396,6 +415,9 @@ const App = () => {
           row.every(cell => typeof cell === 'object' && cell !== null &&
             'id' in cell && 'row' in cell && 'col' in cell && 'color' in cell))) {
         setCells(parsedCells);
+        setTimeout(() => {
+          shuffleCellColors();
+        }, 1000);
       } else {
         throw new Error('Invalid data format pasted.');
       }
@@ -551,7 +573,7 @@ const App = () => {
               ))
             ),
             React.createElement('div', { style: actualGridStyle, ref: actualGridRef },
-              cells.map((row) =>
+              displayCells.map((row) =>
                 row.map((cellData) => (
                   React.createElement(Cell, {
                     key: cellData.id,

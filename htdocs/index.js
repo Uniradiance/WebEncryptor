@@ -20,6 +20,7 @@ const encryptButton = getElement('encryptButton');
 const ciphertextOutput = getElement('ciphertextOutput');
 const copyCiphertextButton = getElement('copyCiphertextButton');
 const saveToManagerButton = getElement('saveToManagerButton');
+const toggleRuleEncrypt = getElement('toggleRuleEncrypt');
 
 const ciphertextInput = getElement('ciphertextInput');
 const ruleDecryptInput = getElement('RuleDecrypt');
@@ -27,6 +28,7 @@ const ChessboardDecryptInput = getElement('ChessboardDecrypt');
 const passwordDecryptInput = getElement('passwordDecrypt');
 const decryptButton = getElement('decryptButton');
 const plaintextOutput = getElement('plaintextOutput');
+const toggleRuleDecrypt = getElement('toggleRuleDecrypt');
 
 // Generate Passworld Elements
 const showGeneratePasswordModalButton = document.getElementById('showGeneratePasswordModalButton');
@@ -312,6 +314,7 @@ encryptButton.addEventListener('click', () => {
             upper,
             lower,
         });
+        window.reactAppRef.current.shuffleCellColors();
     } catch (err) {
         displayError(`Chessboard error for encryption: ${err.message}`);
     }
@@ -531,6 +534,35 @@ closePasswordRetypeButton.addEventListener('click', () => {
     // isPasswordConfirmed remains false, user needs to re-trigger confirmation.
 });
 
+showPassword(toggleRuleEncrypt, ruleEncryptInput);
+showPassword(toggleRuleDecrypt, ruleDecryptInput);
+
+function showPassword(eyeIcon, Input) {
+    // 鼠标按下时显示密码
+    eyeIcon.addEventListener('mousedown', () => {
+        Input.type = 'text';
+    });
+
+    // 鼠标松开时隐藏密码
+    eyeIcon.addEventListener('mouseup', () => {
+        Input.type = 'password';
+    });
+
+    // 鼠标移出图标区域时也隐藏密码（防止按住后移出）
+    eyeIcon.addEventListener('mouseleave', () => {
+        Input.type = 'password';
+    });
+
+    // 触摸开始时显示密码 (移动设备)
+    eyeIcon.addEventListener('touchstart', () => {
+        Input.type = 'text';
+    });
+
+    // 触摸结束时隐藏密码 (移动设备)
+    eyeIcon.addEventListener('touchend', () => {
+        Input.type = 'password';
+    });
+}
 function switchToTab(tabId) {
     tabs.forEach(t => {
         if (t.dataset.tab === tabId) {
@@ -544,7 +576,7 @@ function switchToTab(tabId) {
         if (content.id === tabId) {
             content.classList.add('active');
             if (content.id == 'password-manager' & !content.hasAttribute('size')) {
-                content.style.minWidth = `${content.getBoundingClientRect().width + 60}px`;
+                content.style.minWidth = `${content.getBoundingClientRect().width <= 640 ? content.getBoundingClientRect().width + 60 : 700}px`;
                 content.setAttribute('size', true);
             }
         } else {

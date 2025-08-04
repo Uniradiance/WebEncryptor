@@ -620,3 +620,39 @@ h2 {
 .popup-menu-item:hover {
     background-color: #f3f4f6;
 }
+
+.toggle-rule-button {
+    position: absolute;
+    right: 0.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background-color: transparent;
+    border: none;
+    cursor: pointer;
+    border-radius: 50%;
+    outline: none;
+    transition: background-color 0.2s ease;
+}
+
+.toggle-rule-button .eye-icon {
+    /* El color del trazo (stroke) será controlado por CSS */
+    color: #9CA3AF; /* Gris sutil */
+    transition: color 0.2s ease;
+}
+
+/* Efectos al pasar el ratón */
+.toggle-rule-button:hover {
+    background-color: #F3F4F6; /* Fondo gris claro */
+}
+
+.toggle-rule-button:hover .eye-icon {
+    color: #4B5563; /* El icono se oscurece */
+}
+
+/* Estilo de Foco para Accesibilidad */
+.toggle-rule-button:focus-visible {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); /* Anillo de foco azul */
+}
