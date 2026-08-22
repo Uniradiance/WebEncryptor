@@ -1,5 +1,28 @@
 
 // crypto_worker.js
+// WebEncryptor v2 加密内核
+//
+// 方案 (三因子 + 单层 AEAD):
+//   因子 A: 主口令 (password)
+//   因子 B: 棋盘路径序列 (path, 来自 Interactive Color Grid 的点击顺序 + 颜色)
+//   因子 C: 规则短语 (rulePhrase, 任意固定字符串, 不再是可执行代码)
+//
+//   1. 每次加密生成 16 字节随机盐 randomSalt, 随密文一起存储
+//   2. saltMaterial = u32len(rulePhrase) ‖ rulePhrase ‖ u32len(path) ‖ path ‖ randomSalt
+//   3. argonSalt    = BLAKE2b-128(saltMaterial)      (Argon2id 盐必须恰为 16 字节)
+//   4. masterKey    = Argon2id(password, salt=argonSalt, ops=MODERATE, mem=MODERATE(256MiB), ALG=ARGON2ID13)
+//   5. encKey       = HKDF-SHA256(IKM=masterKey, salt=randomSalt, info="WebEncryptor:enc:v1")
+//   6. 单层 ChaCha20-Poly1305-IETF, AAD="WebEncryptor:v1", 随机 12 字节 IV
+//   输出格式: WE1.<b64(盐)>.<b64(IV)>.<b64(密文)>.<b64(MAC)>
+//
+// 相比旧版 (多层 AES/ChaCha 套娃):
+//   - 旧版攻击者每验证一次口令猜测只需 1 次 PBKDF2(10万次), 而合法用户要跑 (层数+1) 次;
+//     新版把预算集中到一次 Argon2id (内存困难型 KDF), 攻击者每次猜测付出同样成本。
+//   - 移除了 new Function 规则执行: 规则不再是 JS 代码, 消除了代码注入面以及
+//     "注释格式导致口令静默失效" 的陷阱。
+//   - 三个因子全部拼入 KDF 盐: 任一因子泄露, 其余因子仍然必须被猜中。
+//
+// 注意: WE1. 格式与旧版多层密文不兼容。旧密文需用旧版程序先解密, 再用本版重新加密。
 
 importScripts('sodium.js'); // Load sodium.js
 
@@ -23,7 +46,6 @@ const sodiumReadyPromise = (async () => {
     }
     await sodium.ready;
     sodiumInstance = sodium; // Assign to the module-scoped variable
-    console.log("Sodium is ready in worker.");
     self.postMessage({ status: 'success', action: 'worker_init_sodium_ready' });
     return sodiumInstance;
 })().catch(e => {
@@ -33,352 +55,162 @@ const sodiumReadyPromise = (async () => {
     throw e; // Propagate the error so the promise is rejected
 });
 
-
-const IV_LENGTH = 12;
-const KEY_LENGTH_BYTES = 32;
-const TAG_LENGTH_BYTES = 16;
-const PBKDF2_ITERATIONS = 100000;
-
+// --- 常量 ---
+const FORMAT_PREFIX = 'WE1.';          // 格式版本前缀
+const SALT_LENGTH = 16;                // Argon2id 盐长度 (libsodium crypto_pwhash_SALTBYTES)
+const IV_LENGTH = 12;                  // ChaCha20-Poly1305 IETF nonce 长度
+const KEY_LENGTH = 32;                 // 256-bit
+const TAG_LENGTH = 16;                 // 128-bit MAC
+const HKDF_INFO = 'WebEncryptor:enc:v1';
+const AAD = new TextEncoder().encode('WebEncryptor:v1');
+const MAX_RULE_LENGTH = 2048;          // 规则短语长度上限 (字符)
+const MAX_PATH_LENGTH = 65536;         // 棋盘路径字符串长度上限 (字符)
+const MAX_PASSWORD_LENGTH = 4096;      // 口令长度上限 (字符)
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-async function pbkdf2DeriveBaseKeyForHkdf(passwordBytes, saltBytes, iterations, keyLengthInBits) {
-    const importedPasswordKey = await crypto.subtle.importKey(
-        "raw",
-        passwordBytes,
-        { name: "PBKDF2" },
-        false,
-        ["deriveBits"]
-    );
-    const derivedBits = await crypto.subtle.deriveBits(
-        {
-            name: "PBKDF2",
-            salt: saltBytes,
-            iterations: iterations,
-            hash: "SHA-256",
-        },
-        importedPasswordKey,
-        keyLengthInBits
-    );
-    const hkdfBaseKey = await crypto.subtle.importKey(
-        "raw",
-        derivedBits,
-        { name: "HKDF" },
-        false,
-        ["deriveKey", "deriveBits"]
-    );
-    // Securely clear sensitive data
-    if (derivedBits instanceof ArrayBuffer) {
-        new Uint8Array(derivedBits).fill(0);
+// --- 盐材料组装 (长度前缀消除拼接歧义, 可独立单测) ---
+function buildSaltMaterial(rulePhraseStr, pathStr, randomSalt) {
+    const ruleBytes = textEncoder.encode(rulePhraseStr);
+    const pathBytes = textEncoder.encode(pathStr);
+    const out = new Uint8Array(4 + ruleBytes.length + 4 + pathBytes.length + randomSalt.length);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, ruleBytes.length);
+    out.set(ruleBytes, 4);
+    view.setUint32(4 + ruleBytes.length, pathBytes.length);
+    out.set(pathBytes, 8 + ruleBytes.length);
+    out.set(randomSalt, 8 + ruleBytes.length + pathBytes.length);
+    return out;
+}
+
+// --- 三因子 → 加密密钥 ---
+async function deriveEncryptionKey(passwordStr, rulePhraseStr, pathStr, randomSalt) {
+    const sodium = await sodiumReadyPromise;
+    if (!sodium) throw new Error("Sodium.js not initialized.");
+
+    const saltMaterial = buildSaltMaterial(rulePhraseStr, pathStr, randomSalt);
+    // BLAKE2b 单向压缩为 Argon2id 需要的 16 字节盐 (盐无需保密, 只需唯一)
+    const argonSalt = sodium.crypto_generichash(SALT_LENGTH, saltMaterial, null);
+    saltMaterial.fill(0);
+
+    let masterKey;
+    try {
+        masterKey = sodium.crypto_pwhash(
+            KEY_LENGTH,
+            textEncoder.encode(passwordStr),
+            argonSalt,
+            sodium.crypto_pwhash_OPSLIMIT_MODERATE,   // 3 passes
+            sodium.crypto_pwhash_MEMLIMIT_MODERATE,   // 256 MiB
+            sodium.crypto_pwhash_ALG_ARGON2ID13
+        );
+    } catch (e) {
+        argonSalt.fill(0);
+        throw new Error(`Argon2id 密钥派生失败: ${(e && e.message) || e}`);
     }
-    return hkdfBaseKey;
-}
+    argonSalt.fill(0);
 
-async function hkdfDeriveKeyAndIv(baseHkdfKey, saltBytes, infoBytes, keyLen, ivLen) {
-    const totalLengthBytes = keyLen + ivLen;
-    const derivedBytesArrayBuffer = await crypto.subtle.deriveBits(
-        { name: "HKDF", hash: "SHA-256", salt: saltBytes, info: infoBytes },
-        baseHkdfKey,
-        totalLengthBytes * 8
+    // HKDF 做密钥分离/域分离 (为将来派生 "auth:v1" 等子密钥留好位置)
+    const hkdfKey = await crypto.subtle.importKey("raw", masterKey, { name: "HKDF" }, false, ["deriveBits"]);
+    masterKey.fill(0); // 尽力清零 (JS 内存管理下仅为心理安慰)
+    const bits = await crypto.subtle.deriveBits(
+        { name: "HKDF", hash: "SHA-256", salt: randomSalt, info: textEncoder.encode(HKDF_INFO) },
+        hkdfKey,
+        KEY_LENGTH * 8
     );
-    const derivedBytes = new Uint8Array(derivedBytesArrayBuffer);
-    const key = derivedBytes.slice(0, keyLen);    
-    // iv 通过安全随机生成
-    const iv = new Uint8Array(ivLen);
-    crypto.getRandomValues(iv);
-
-    derivedBytes.fill(0);
-    return { key, iv };
+    return new Uint8Array(bits);
 }
 
-async function aesGcmLayerEncrypt(plaintext, keyBytes, ivBytes) {
-    const cryptoKey = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
-    const ciphertextBuffer = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv: ivBytes, tagLength: TAG_LENGTH_BYTES * 8 },
-        cryptoKey,
-        plaintext
-    );
-    const result = new Uint8Array(IV_LENGTH + ciphertextBuffer.byteLength);
-    result.set(ivBytes, 0);
-    result.set(new Uint8Array(ciphertextBuffer), IV_LENGTH);
-    return result;
-}
-
-async function aesGcmLayerDecrypt(dataWithIvAndTag, keyBytes) {
-    const iv = dataWithIvAndTag.slice(0, IV_LENGTH);
-    const ciphertextWithTag = dataWithIvAndTag.slice(IV_LENGTH);
-    const cryptoKey = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
-    const plaintextBuffer = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv, tagLength: TAG_LENGTH_BYTES * 8 },
-        cryptoKey,
-        ciphertextWithTag
-    );
-    return new Uint8Array(plaintextBuffer);
-}
-
-async function chacha20Poly1305LayerEncrypt(plaintextUint8Array, keyBytes, ivBytes) {
+// --- 加密 (单层 ChaCha20-Poly1305) ---
+async function encryptString(plaintextStr, passwordStr, rulePhraseStr, pathStr) {
     const sodium = await sodiumReadyPromise;
     if (!sodium) throw new Error("Sodium.js not initialized for encryption.");
 
+    const plaintext = textEncoder.encode(plaintextStr);
+    const randomSalt = new Uint8Array(SALT_LENGTH);
+    crypto.getRandomValues(randomSalt);
+
+    self.postMessage({ status: 'progress', action: 'encrypt', currentStep: 1, totalSteps: 2, stepName: '派生密钥 (Argon2id)' });
+    const key = await deriveEncryptionKey(passwordStr, rulePhraseStr, pathStr, randomSalt);
+
+    self.postMessage({ status: 'progress', action: 'encrypt', currentStep: 2, totalSteps: 2, stepName: '加密 (ChaCha20-Poly1305)' });
+    const iv = new Uint8Array(IV_LENGTH);
+    crypto.getRandomValues(iv);
     const { ciphertext, mac } = sodium.crypto_aead_chacha20poly1305_ietf_encrypt_detached(
-        plaintextUint8Array,
-        null, // no additional data (AAD) for this layer
+        plaintext,
+        AAD,
         null, // nsec not used
-        ivBytes,
-        keyBytes
+        iv,
+        key
     );
 
-    const result = new Uint8Array(IV_LENGTH + ciphertext.length + TAG_LENGTH_BYTES);
-    result.set(ivBytes, 0);
-    result.set(ciphertext, IV_LENGTH);
-    result.set(mac, IV_LENGTH + ciphertext.length);
+    const result = FORMAT_PREFIX
+        + uint8ArrayToBase64(randomSalt) + '.'
+        + uint8ArrayToBase64(iv) + '.'
+        + uint8ArrayToBase64(ciphertext) + '.'
+        + uint8ArrayToBase64(mac);
+
+    key.fill(0); iv.fill(0); // 尽力清零
     return result;
 }
 
-async function chacha20Poly1305LayerDecrypt(dataWithIvCipherTag, keyBytes) {
+// --- 密文解析 (严格校验) ---
+function parseCiphertext(ciphertextStr) {
+    if (typeof ciphertextStr !== 'string' || !ciphertextStr.startsWith(FORMAT_PREFIX)) {
+        throw new Error('无法识别的密文格式: 不是本软件 v1 (WE1.) 格式。旧版多层加密的密文与本版不兼容, 需用旧版先解密。');
+    }
+    const parts = ciphertextStr.slice(FORMAT_PREFIX.length).split('.');
+    if (parts.length !== 4) {
+        throw new Error('密文格式错误: 应为 WE1.<盐>.<IV>.<密文>.<MAC> 共 4 段。');
+    }
+    const salt = base64ToUint8Array(parts[0]);
+    const iv = base64ToUint8Array(parts[1]);
+    const ct = base64ToUint8Array(parts[2]);
+    const mac = base64ToUint8Array(parts[3]);
+    if (salt.length !== SALT_LENGTH || iv.length !== IV_LENGTH || mac.length !== TAG_LENGTH || ct.length === 0) {
+        throw new Error('密文格式错误: 字段长度不合法。');
+    }
+    return { salt, iv, ct, mac };
+}
+
+// --- 解密 (单层 ChaCha20-Poly1305) ---
+async function decryptString(ciphertextStr, passwordStr, rulePhraseStr, pathStr) {
     const sodium = await sodiumReadyPromise;
     if (!sodium) throw new Error("Sodium.js not initialized for decryption.");
 
-    const iv = dataWithIvCipherTag.slice(0, IV_LENGTH);
-    const ciphertextPart = dataWithIvCipherTag.slice(IV_LENGTH, dataWithIvCipherTag.length - TAG_LENGTH_BYTES);
-    const tagPart = dataWithIvCipherTag.slice(dataWithIvCipherTag.length - TAG_LENGTH_BYTES);
+    const { salt, iv, ct, mac } = parseCiphertext(ciphertextStr);
 
+    self.postMessage({ status: 'progress', action: 'decrypt', currentStep: 1, totalSteps: 2, stepName: '派生密钥 (Argon2id)' });
+    const key = await deriveEncryptionKey(passwordStr, rulePhraseStr, pathStr, salt);
+
+    self.postMessage({ status: 'progress', action: 'decrypt', currentStep: 2, totalSteps: 2, stepName: '解密 (ChaCha20-Poly1305)' });
     const plaintext = sodium.crypto_aead_chacha20poly1305_ietf_decrypt_detached(
         null, // nsec not used
-        ciphertextPart,
-        tagPart,
-        null, // no additional data (AAD) for this layer
-        iv,
-        keyBytes
-    );
-    if (!plaintext) { // Sodium's decrypt_detached returns null on verification failure
-        throw new Error("ChaCha20-Poly1305 layer decryption failed: Authentication tag mismatch or other error.");
-    }
-    return plaintext;
-}
-
-async function finalChacha20Poly1305Encrypt(plaintextUint8Array, keyBytes, ivBytes) {
-    const sodium = await sodiumReadyPromise;
-    if (!sodium) throw new Error("Sodium.js not initialized for final encryption.");
-
-    const { ciphertext, mac } = sodium.crypto_aead_chacha20poly1305_ietf_encrypt_detached(
-        plaintextUint8Array,
-        new Uint8Array(0), // AAD is empty for the final layer
-        null, // nsec not used
-        ivBytes,
-        keyBytes
-    );
-    // Output format: base64(iv).base64(ciphertext).base64(mac)
-    return uint8ArrayToBase64(ivBytes) + "." + uint8ArrayToBase64(ciphertext) + "." + uint8ArrayToBase64(mac);
-}
-
-async function initialChacha20Poly1305Decrypt(base64CiphertextWithDots, keyBytes) {
-    const sodium = await sodiumReadyPromise;
-    if (!sodium) throw new Error("Sodium.js not initialized for initial decryption.");
-
-    const parts = base64CiphertextWithDots.split('.');
-    if (parts.length !== 3) {
-        throw new Error("Initial decryption failed: Invalid ciphertext format (expected 3 base64 parts separated by dots).");
-    }
-    const iv = base64ToUint8Array(parts[0]);
-    const ciphertext = base64ToUint8Array(parts[1]);
-    const mac = base64ToUint8Array(parts[2]);
-
-    if (iv.length !== IV_LENGTH || mac.length !== TAG_LENGTH_BYTES) {
-        throw new Error("Initial decryption failed: Invalid IV or MAC length after base64 decoding.");
-    }
-
-    const plaintext = sodium.crypto_aead_chacha20poly1305_ietf_decrypt_detached(
-        null, // nsec not used
-        ciphertext,
+        ct,
         mac,
-        new Uint8Array(0), // AAD is empty for the final layer
+        AAD,
         iv,
-        keyBytes
+        key
     );
+    key.fill(0); // 尽力清零
 
     if (plaintext === null) { // Sodium returns null on decryption/verification failure
-        throw new Error("Final ChaCha20-Poly1305 decryption failed: Authentication tag mismatch or other error.");
+        throw new Error('解密失败: 口令、规则短语或棋盘不匹配, 或密文已被篡改。');
     }
-    return plaintext; // This is Uint8Array
+    return textDecoder.decode(plaintext);
 }
 
-/**
- * Generates a binary rule sequence ('0' or '1's) from a seed number string.
- * '0' might represent AES, '1' might represent ChaCha20.
- * @param {string} seedNumberStr - The seed number as a string.
- * @returns {string[]} Array of '0's and '1's.
- */
-function generateLayeringRules(seedNumberStr) {
-    try {
-        const seedBigInt = BigInt(seedNumberStr);
-        if (seedBigInt < 0) throw new Error("Layer sequence seed must be a non-negative integer.");
-        if (seedNumberStr.length > 1000) throw new Error("Layer sequence seed number string is too large (max 1000 digits).");
-
-        const binarySequence = seedBigInt.toString(2);
-        if (binarySequence.length > 100) throw new Error("Resulting binary sequence for rules is too long (max 100 layers defined by rules).");
-        return binarySequence.split('');
-    } catch (e) {
-        throw new Error(`Invalid Layer Sequence Seed: ${e.message || "Not a valid large integer string."}`);
-    }
-}
-
-
-async function deriveLayerSpecificMaterial(originalPasswordStr, pathStr, upperStr, lowerStr) {
-    const originalPasswordBytes = textEncoder.encode(originalPasswordStr);
-    // Create a mutable copy for potential in-place operations or zeroing
-    let tempOriginalPasswordBytesView = originalPasswordBytes.slice();
-
-    const pbkdf2OutputKeyLengthBits = 256;
-
-    const layerPbkdfSalt = textEncoder.encode(pathStr);
-    const layerHkdfSalt = textEncoder.encode(upperStr);
-    const layerHkdfInfo = textEncoder.encode(lowerStr);
-
-    const baseHkdfKeyForLayer = await pbkdf2DeriveBaseKeyForHkdf(
-        tempOriginalPasswordBytesView,
-        layerPbkdfSalt,
-        PBKDF2_ITERATIONS,
-        pbkdf2OutputKeyLengthBits
-    );
-
-    // Securely clear the temporary password view
-    if (tempOriginalPasswordBytesView.fill) tempOriginalPasswordBytesView.fill(0);
-
-    return await hkdfDeriveKeyAndIv(
-        baseHkdfKeyForLayer,
-        layerHkdfSalt,
-        layerHkdfInfo,
-        KEY_LENGTH_BYTES,
-        IV_LENGTH
-    );
-}
-
-/**
- * Transforms the password for a specific encryption layer using a JS rule.
- * This is a form of password obfuscation.
- * @param {string} passwordStr - The current password string.
- * @param {string} transformRuleJs - JS code string defining the transformation.
- * @param {number} roundIndex - The current layer/round index.
- * @returns {string} Base64 encoded transformed password.
- */
-function transformPasswordForLayer(passwordStr, transformRuleJs, roundIndex) {
-    const passwordBytes = textEncoder.encode(passwordStr);
-
-    try {
-        // transformRuleJs is expected to be a JS expression string like "byte => (byte + i) % 256"
-        const wrappedFuncStr = `"use strict"; return data.map((byte, idx) => ${transformRuleJs});`;
-        const userFunc = new Function('data', 'i', wrappedFuncStr); // 'i' here is the roundIndex
-        const transformedBytes = userFunc(passwordBytes, roundIndex);
-
-        if (!transformedBytes || typeof transformedBytes.map !== 'function' || !(transformedBytes instanceof Uint8Array || Array.isArray(transformedBytes))) {
-            throw new Error("Password transformation function did not return a valid array/Uint8Array.");
-        }
-        // Ensure result is Uint8Array for String.fromCharCode.apply
-        const finalBytes = Uint8Array.from(transformedBytes);
-
-        const binaryString = String.fromCharCode.apply(null, finalBytes);
-        return btoa(binaryString); // Base64 encode
-    } catch (e) {
-        console.error(`Error in password transformation rule at round ${roundIndex}:`, e);
-        throw new Error(`Password Transformation Rule error (round ${roundIndex}): ${e.message}`);
-    }
-}
-
-async function layeredEncrypt(plaintextStr, passwordStr, passwordTransformRuleJs, pathStr, upperStr, lowerStr) {
-    const sodium = await sodiumReadyPromise;
-    if (!sodium) throw new Error("Sodium.js not initialized for layered encryption.");
-
-    let currentData = textEncoder.encode(plaintextStr);
-
-    // Derive the layer sequence (e.g., '01011') from the passwordTransformRuleJs string
-    const ruleBytes = textEncoder.encode(passwordTransformRuleJs);
-    const layerSequenceSeedNumber = ruleBytes.reduce((acc, byteValue) => acc + byteValue, 0);
-    console.log(layerSequenceSeedNumber)
-    const layerRules = generateLayeringRules(String(layerSequenceSeedNumber));
-
-    const totalProgressSteps = layerRules.length + 1; // +1 for the final ChaCha layer
-
-    for (let i = 0; i < layerRules.length; i++) {
-        const transformedPassword = transformPasswordForLayer(passwordStr, passwordTransformRuleJs, i);
-        const { key, iv } = await deriveLayerSpecificMaterial(transformedPassword, pathStr, upperStr, lowerStr);
-
-        if (layerRules[i] === '0') { // Assuming '0' for AES
-            currentData = await aesGcmLayerEncrypt(currentData, key, iv);
-        } else { // Assuming '1' for ChaCha20-Poly1305
-            currentData = await chacha20Poly1305LayerEncrypt(currentData, key, iv);
-        }
-        // Zero out key and iv after use if they are Uint8Array views and not needed anymore.
-        // However, they are re-derived in the next iteration, so this might be optional.
-        // key.fill(0); iv.fill(0); 
-        self.postMessage({ status: 'progress', action: 'encrypt', currentStep: i + 1, totalSteps: totalProgressSteps });
-    }
-
-    // Final layer uses ChaCha20-Poly1305
-    const finalTransformedPassword = transformPasswordForLayer(passwordStr, passwordTransformRuleJs, layerRules.length);
-    const { key: finalKey, iv: finalIv } = await deriveLayerSpecificMaterial(finalTransformedPassword, pathStr, upperStr, lowerStr);
-    const finalResultBase64 = await finalChacha20Poly1305Encrypt(currentData, finalKey, finalIv);
-    // finalKey.fill(0); finalIv.fill(0);
-
-    self.postMessage({ status: 'progress', action: 'encrypt', currentStep: totalProgressSteps, totalSteps: totalProgressSteps });
-
-    // Securely clear intermediate data if it's not the original plaintext
-    // (The original plaintextStr is not modified, currentData holds intermediate ciphertexts)
-    const originalPlaintextBytes = textEncoder.encode(plaintextStr);
-     if (currentData.length !== originalPlaintextBytes.length || !currentData.every((val, index) => val === originalPlaintextBytes[index])) {
-        if (typeof currentData.fill === 'function') {
-            currentData.fill(0);
-        }
-    }
-    return finalResultBase64;
-}
-
-async function layeredDecrypt(base64Ciphertext, passwordStr, passwordTransformRuleJs, pathStr, upperStr, lowerStr) {
-    const sodium = await sodiumReadyPromise;
-    if (!sodium) throw new Error("Sodium.js not initialized for layered decryption.");
-
-    // Derive the layer sequence (e.g., '01011') from the passwordTransformRuleJs string
-    const ruleBytes = textEncoder.encode(passwordTransformRuleJs);
-    const layerSequenceSeedNumber = ruleBytes.reduce((acc, byteValue) => acc + byteValue, 0);
-    const layerRules = generateLayeringRules(String(layerSequenceSeedNumber));
-    
-    const totalProgressSteps = layerRules.length + 1; // +1 for the initial ChaCha layer
-
-    // Initial layer uses ChaCha20-Poly1305
-    const initialTransformedPassword = transformPasswordForLayer(passwordStr, passwordTransformRuleJs, layerRules.length);
-    // IV for initialChacha20Poly1305Decrypt is part of base64CiphertextWithDots
-    const { key: initialKey } = await deriveLayerSpecificMaterial(initialTransformedPassword, pathStr, upperStr, lowerStr);
-    let currentData = await initialChacha20Poly1305Decrypt(base64Ciphertext, initialKey);
-    // initialKey.fill(0);
-
-    self.postMessage({ status: 'progress', action: 'decrypt', currentStep: 1, totalSteps: totalProgressSteps });
-
-    try {
-        for (let i = layerRules.length - 1; i >= 0; i--) {
-            const transformedPassword = transformPasswordForLayer(passwordStr, passwordTransformRuleJs, i);
-            const { key: layerKey, iv: layerIv } = await deriveLayerSpecificMaterial(transformedPassword, pathStr, upperStr, lowerStr);
-
-            if (layerRules[i] === '0') { // Assuming '0' for AES
-                currentData = await aesGcmLayerDecrypt(currentData, layerKey);
-            } else { // Assuming '1' for ChaCha20-Poly1305
-                currentData = await chacha20Poly1305LayerDecrypt(currentData, layerKey);
-            }
-            // layerKey.fill(0); layerIv.fill(0); // Optional: zero out after use
-            self.postMessage({ status: 'progress', action: 'decrypt', currentStep: layerRules.length - i + 1, totalSteps: totalProgressSteps });
-        }
-        return textDecoder.decode(currentData);
-    } finally {
-        // Securely clear the final plaintext bytes or intermediate decrypted data
-        if (currentData && typeof currentData.fill === 'function') {
-            currentData.fill(0);
-        }
-    }
-}
-
+// --- Worker 消息入口 ---
 self.onmessage = async (e) => {
     let responsePayload;
-    const { action, plaintext, ciphertext, password, passwordTransformRuleJs, path, upper, lower } = e.data;
+    const data = e.data || {};
+    const action = data.action;
+    const plaintext = data.plaintext;
+    const ciphertext = data.ciphertext;
+    const password = data.password;
+    // 规则短语与棋盘作为密钥因子: 去除首尾空白, 避免"多打一个空格导致解密失败"
+    const rulePhrase = typeof data.rulePhrase === 'string' ? data.rulePhrase.trim() : data.rulePhrase;
+    const path = typeof data.path === 'string' ? data.path.trim() : data.path;
 
     try {
         const sodium = await sodiumReadyPromise; // Ensure sodium is ready before proceeding
@@ -387,16 +219,22 @@ self.onmessage = async (e) => {
         }
 
         if (action === 'encrypt') {
-            if (!plaintext || !password || !passwordTransformRuleJs || !path || !upper || !lower) {
-                throw new Error("Missing parameters for encryption: plaintext, password, passwordTransformRuleJs, path, upper, and lower are required.");
+            if (!plaintext || !password || !rulePhrase || !path) {
+                throw new Error("加密参数缺失: 明文、口令、规则短语、棋盘均不能为空。");
             }
-            const result = await layeredEncrypt(plaintext, password, passwordTransformRuleJs, path, upper, lower);
+            if (password.length > MAX_PASSWORD_LENGTH || rulePhrase.length > MAX_RULE_LENGTH || path.length > MAX_PATH_LENGTH) {
+                throw new Error(`输入过长: 口令≤${MAX_PASSWORD_LENGTH}, 规则短语≤${MAX_RULE_LENGTH}, 棋盘≤${MAX_PATH_LENGTH} 字符。`);
+            }
+            const result = await encryptString(plaintext, password, rulePhrase, path);
             responsePayload = { status: 'success', action, result };
-        } else if (action === 'decrypt' | action === 'verify') {
-            if (!ciphertext || !password || !passwordTransformRuleJs || !path || !upper || !lower) {
-                throw new Error("Missing parameters for decryption: ciphertext, password, passwordTransformRuleJs, path, upper, and lower are required.");
+        } else if (action === 'decrypt' || action === 'verify') {
+            if (!ciphertext || !password || !rulePhrase || !path) {
+                throw new Error("解密参数缺失: 密文、口令、规则短语、棋盘均不能为空。");
             }
-            const result = await layeredDecrypt(ciphertext, password, passwordTransformRuleJs, path, upper, lower);
+            if (password.length > MAX_PASSWORD_LENGTH || rulePhrase.length > MAX_RULE_LENGTH || path.length > MAX_PATH_LENGTH) {
+                throw new Error(`输入过长: 口令≤${MAX_PASSWORD_LENGTH}, 规则短语≤${MAX_RULE_LENGTH}, 棋盘≤${MAX_PATH_LENGTH} 字符。`);
+            }
+            const result = await decryptString(ciphertext, password, rulePhrase, path);
             responsePayload = { status: 'success', action, result };
         } else {
             throw new Error(`Unknown action: ${action}`);

@@ -1,6 +1,14 @@
 
 import { passwordService } from './password_service.js';
 
+// The use-for-decrypt button has two roles depending on the card state:
+// - normal (view) mode: decrypt the stored ciphertext directly (no page jump)
+// - edit mode: jump to the decryption tab (fill ciphertext, switch mode/tab)
+function setUseForDecryptBtnState(btn, isEditing) {
+    btn.title = isEditing ? 'Jump to Decryption Tab' : 'Decrypt';
+    btn.setAttribute('aria-label', isEditing ? 'Jump to Decryption Tab' : 'Decrypt');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     // This script might run before or after the main index.js,
     // so we need to ensure we don't cause issues if elements aren't found.
@@ -80,6 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // --- Event Listeners ---
         editBtn.addEventListener('click', () => {
             cardElement.classList.add('editing');
+            setUseForDecryptBtnState(useForDecryptBtn, true); // Edit mode: jump to decryption tab
         });
 
         cancelBtn.addEventListener('click', () => {
@@ -89,6 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
             passwordInput.value = passwordData.password;
             // Exit edit mode
             cardElement.classList.remove('editing');
+            setUseForDecryptBtnState(useForDecryptBtn, false); // Back to normal mode: direct decrypt
         });
 
         saveBtn.addEventListener('click', async () => {
@@ -117,6 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     nameEl.textContent = updatedPassword.name;
                     descriptionEl.textContent = updatedPassword.description;
                     cardElement.classList.remove('editing');
+                    setUseForDecryptBtnState(useForDecryptBtn, false); // Back to normal mode: direct decrypt
                 }
             } catch (error) {
                 console.error("Failed to save password:", error);
@@ -129,35 +140,47 @@ document.addEventListener('DOMContentLoaded', () => {
         
         useForDecryptBtn.addEventListener('click', () => {
             const ciphertextInput = document.getElementById('ciphertextInput');
-            const loadingIndicator = document.getElementById('loadingIndicator');
 
-            if (ciphertextInput && window.switchToTab) {
-                // 1. Set the value
-                ciphertextInput.value = passwordData.password;
+            if (cardElement.classList.contains('editing')) {
+                // Edit mode: jump to the decryption tab (fill ciphertext, switch mode and tab)
+                if (ciphertextInput && window.switchToTab && window.switchCryptoMode) {
+                    // 1. Set the value
+                    ciphertextInput.value = passwordData.password;
 
-                // 2. Switch to the decrypt tab
-                window.switchToTab('decrypt');
+                    // 2. Switch to the decryption input card (mutually exclusive mode)
+                    window.switchCryptoMode('decrypt');
 
-                // 3. Focus the input for better UX
-                ciphertextInput.focus();
+                    // 3. Switch to the crypto tab
+                    window.switchToTab('crypto');
 
-                // 4. Show a temporary confirmation message
-                if (loadingIndicator) {
-                    loadingIndicator.textContent = "Ciphertext populated for decryption.";
-                    loadingIndicator.style.display = 'block';
-                    setTimeout(() => {
-                        // Check if the message is still the one we set before hiding it
-                        if (loadingIndicator.textContent === "Ciphertext populated for decryption.") {
-                            loadingIndicator.style.display = 'none';
-                        }
-                    }, 2000);
+                    // 4. Focus the input for better UX
+                    ciphertextInput.focus();
+                } else {
+                    if (!ciphertextInput) {
+                        alert('Could not find the decryption input field.');
+                    }
+                    if (!window.switchCryptoMode) {
+                        alert('Could not switch to decryption mode. The main script might have an issue.');
+                    }
+                    if (!window.switchToTab) {
+                        alert('Could not switch tabs. The main script might have an issue.');
+                    }
                 }
             } else {
-                if (!ciphertextInput) {
-                    alert('Could not find the decryption input field.');
-                }
-                if (!window.switchToTab) {
-                    alert('Could not switch tabs. The main script might have an issue.');
+                // Normal (view) mode: decrypt the stored ciphertext directly, no page jump
+                if (ciphertextInput && window.triggerDecrypt) {
+                    // 1. Set the value (used by the decryption step)
+                    ciphertextInput.value = passwordData.password;
+
+                    // 2. Directly run the decryption step; the result is shown in a floating window
+                    window.triggerDecrypt();
+                } else {
+                    if (!ciphertextInput) {
+                        alert('Could not find the decryption input field.');
+                    }
+                    if (!window.triggerDecrypt) {
+                        alert('Could not trigger decryption. The main script might have an issue.');
+                    }
                 }
             }
         });
@@ -200,6 +223,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const newCard = passwordList.querySelector(`[data-id='${newPasswordEntry.id}']`);
                 if (newCard) {
                     newCard.classList.add('editing');
+                    setUseForDecryptBtnState(newCard.querySelector('.use-for-decrypt-btn'), true);
                     newCard.querySelector('[data-name-input]').focus();
                     newCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }

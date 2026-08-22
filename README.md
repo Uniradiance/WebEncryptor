@@ -1,295 +1,76 @@
 # 这是一个基于web的文本加密软件，有密码管理功能。
-特点是通过ChaCha20-Poly1305和AES-GCM混合加密，造就了一个加密复杂解密也复杂的加密软件。安全性属于ChaCha20-Poly1305的安全性加AES-GCM的安全性再加 [1]。
-原本想运行在浏览器上，但限制太多太多了，让这个软件意义降低了一半，不过我用python做了个简单的部署程序。
+
+采用**三因子密钥派生 + 单层 AEAD** 方案：主口令、棋盘路径、规则短语三个因子拼入 KDF 盐，经 **Argon2id**（内存困难型 KDF，3 轮 / 256 MiB）派生主密钥，再经 HKDF-SHA256 分离出加密密钥，最后用 **ChaCha20-Poly1305**（单层）加密。安全性取决于三因子组合熵 + Argon2id 的成本，密文可以公开存放。
+
+## 部署方式（推荐）：Go 单文件服务器
+
+`server.go` 是**推荐的后端**：单个可执行文件、零运行时依赖、跨平台（Windows / macOS / Linux / ARM），静态网页已嵌入二进制，`htdocs/` 文件夹都不需要分发。
+
+**为什么选它：**
+- **免 root**：默认监听 8443 端口（>1024 无需管理员权限），不再绑定 443
+- **便携**：整个程序就一个文件；`cert/`、`passwords.json`、`server.log` 都生成在可执行文件旁边，整个文件夹拷走即用
+- **多平台**：一条 `./build.sh` 交叉编译出 8 种平台的产物到 `dist/`
+- **可托管任意静态网页**：`--dir <文件夹>` 可以把任何静态站点目录挂上去（开发时也可用它指向 htdocs 免重新编译）
+- **可纯明文**：`--http` 关闭 TLS，适合内网或放在 nginx/Caddy 后面
+
+**快速开始：**
+```bash
+./build.sh                          # 生成 dist/ 下所有平台二进制
+./dist/webencryptor-linux-amd64 --token 9f8a7b6c5d4e3f2a1b0c   # 启动
+```
+Windows 双击 `webencryptor-windows-amd64.exe`（带控制台）或 `webencryptor-windows-amd64-silent.exe`（静默版，无窗口）即可，浏览器会自动打开。
+
+**参数：**
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--port` | `8443` | 监听端口（>1024 无需 root） |
+| `--token` | 无 | API 访问令牌，不设置则局域网内任何人都能读写密码库（强烈建议设置） |
+| `--http` | 关 | 纯 HTTP，不启用 TLS |
+| `--dir` | 内嵌 htdocs | 改为从外部目录提供静态文件 |
+| `--san` | `localhost,127.0.0.1` | 证书 SAN（逗号分隔的域名/IP） |
+| `--days` | `365` | 证书有效天数 |
+| `--cn` / `--org` | `localhost` / `WebEncryptor` | 证书主题 |
+| `--no-browser` | 关 | 不自动打开浏览器 |
+| `--debug` | 关 | 日志同时写入 `server.log` |
 
 ## 加密规则
-1. 基础密码（Password for Encryption）： 加解密用到的密码，所有的加密key都是它诞生的。
-2. 规则（Rule）：混淆基础密码用到的规则，有byte和i两个参数，byte密码原文，i是当前加密的轮次。示例：`(byte ^ (i ^ 123) )&255` 这样每一轮密码都是混淆后的密码，即时泄露加密密码也不影响安全。最后的&255必加，防止异常。
-3. 棋盘（Interactive Color Grid (Path)）: 混淆密码用到的数据，类似于手机上的图案解锁功能更，但是多了颜色维度。使用时点击顺序必须保持一致，上下分区都要有内容。
+1. **基础密码（Password for Encryption）**：因子 A，你记住的主口令。
+2. **规则短语（Rule Phrase）**：因子 C，任意固定字符串（不再是可执行代码！），例如 `my-vault-v2`。写在纸上或存在配置文件里都行。
+3. **棋盘（Interactive Color Grid (Path)）**：因子 B，类安卓图案解锁的彩色棋盘，点击顺序 + 颜色构成路径字符串，加密与解密时必须完全一致。
 
-# 生成密码
+三个因子全部拼入 KDF 盐材料（长度前缀编码消除拼接歧义），**缺一不可、互为兜底**：泄露其中任意一个，其余两个仍然必须被猜中；攻击者每验证一次完整猜测都要付一次 Argon2id（256 MiB 内存 + 3 轮）的成本。
+
+## 密文格式
+输出为 `WE1.<盐(16B,base64)>.<IV(12B,base64)>.<密文(base64)>.<MAC(16B,base64)>`，随机盐随密文存储。
+
+> ⚠️ **兼容性警告**：`WE1.` 格式与旧版"多层 AES/ChaCha 套娃"密文**不兼容**。旧密文需要用旧版程序先解密，再用本版重新加密。旧版的多层方案已被移除——它不增加安全性，只会让合法用户比攻击者多付 (层数+1) 倍的 KDF 成本。
+
+## 生成密码
 在加密也有生成密码选项，可生成8、14、18位随机密码。
-
-## 命令行参数
-Windows平台直接运行`httpServer.exe`就会自动打开页面。如果不知道证书是什么那就什么都不用管，双击运行就能正常使用。
-
-### 注意事项
-1. **首次运行行为**:
-   - 如果 `cert/cert.pem` 不存在会自动生成证书
-   - 证书生成期间控制台保持可见
-   - 服务器启动后自动打开浏览器
-
-2. **安全提示**:
-   - 证书是自签名的（浏览器会显示安全警告）
-   - 使用 `--san` 添加所有需要的域名/IP
-   - 密码存储在 `passwords.json`
-
-3. **关闭服务器**:
-   - 点击Manager右边的 [⫶] 会显示Shutdown，点击即可关闭服务器
-   - 这个应用空载运行时只需要16MB+内存，系统消耗很低
-
----
-
-### 1. 控制台管理
-```bash
---hide-console
-```
-- **用途**: 成功启动后隐藏控制台窗口（仅限 Windows）
-- **行为**:
-  - 启动期间控制台窗口可见
-  - 服务器初始化后自动隐藏
-- **示例**:
-  ```bash
-  httpServer.exe --hide-console
-  ```
-
-### 2. 调试模式
-```bash
---debug
-```
-- **用途**: 启用日志记录到文件
-- **行为**:
-  - 将所有服务器日志保存到 `server.log`
-  - 用于故障排除
-- **示例**:
-  ```bash
-  httpServer.exe --debug
-  ```
-
-### 3. 证书生成选项
-当需要生成新 SSL 证书时使用这些参数：
-
-```bash
--c, --country 国家代码
-```
-- **用途**: 证书的 2 字母国家代码
-- **默认值**: `CN`
-- **示例**:
-  ```bash
-  httpServer.exe -c US
-  ```
-
-```bash
--s, --state 州/省名称
-```
-- **用途**: 证书的州/省名称
-- **默认值**: `Beijing`
-- **示例**:
-  ```bash
-  httpServer.exe -s "California"
-  ```
-
-```bash
--l, --locality 城市名称
-```
-- **用途**: 证书的城市/地区名称
-- **默认值**: `Beijing`
-- **示例**:
-  ```bash
-  httpServer.exe -l "San Francisco"
-  ```
-
-```bash
--o, --org 组织名称
-```
-- **用途**: 证书的组织名称
-- **默认值**: `My Test Company`
-- **示例**:
-  ```bash
-  httpServer.exe -o "Acme Corp"
-  ```
-
-```bash
---cn 通用名称
-```
-- **用途**: 证书的域名（通用名称）
-- **默认值**: `localhost`
-- **示例**:
-  ```bash
-  httpServer.exe --cn myserver.local
-  ```
-
-```bash
---san 备用名称
-```
-- **用途**: 证书的额外域名/IP 地址
-- **默认值**: `localhost 127.0.0.1`
-- **格式**: 空格分隔的列表
-- **示例**:
-  ```bash
-  httpServer.exe --san "myserver.local 192.168.1.100"
-  ```
-
-```bash
--d, --days 有效天数
-```
-- **用途**: 证书有效期（天）
-- **默认值**: `365`
-- **示例**:
-  ```bash
-  httpServer.exe -d 730  # 2 年有效期
-  ```
-
-### 完整证书生成示例
-```bash
-httpServer.exe \
-  --country US \
-  --state "New York" \
-  --locality "New York City" \
-  --org "My Company" \
-  --cn myserver.local \
-  --san "myserver.local 192.168.1.100" \
-  --days 730
-```
 
 # 声明
 这个项目基本上是AI写的，我负责复制粘贴。
 
 # Web-Based Text Encryption Software with Password Management
 
-This software uses hybrid encryption with ChaCha20-Poly1305 and AES-GCM, creating a solution where both encryption and decryption processes are complex. The security level combines the security of ChaCha20-Poly1305 plus AES-GCM security plus [1].
-
-Originally designed to run in browsers, significant limitations reduced its effectiveness. As an alternative, I've created a simple deployment solution using Python.
+This software uses a **three-factor key derivation + single-layer AEAD** scheme: the master password, the color-grid path, and a rule phrase are all folded into the KDF salt material; **Argon2id** (3 passes / 256 MiB) derives a master key; HKDF-SHA256 separates the encryption key; **ChaCha20-Poly1305** (single layer) does the encryption. Ciphertexts are safe to store publicly.
 
 ## Encryption Rules
-1. **Base Password (Password for Encryption)**: Used for encryption/decryption. All cryptographic keys derive from this.
-2. **Rule**: Obfuscation logic for the base password. Takes `byte` (password byte) and `i` (encryption round index) as parameters. Example: `(byte ^ (i ^ 123)) & 255` ensures each round uses an obfuscated password. Final `& 255` prevents exceptions.
-3. **Interactive Color Grid (Path)**: Obfuscation data similar to Android pattern unlock, but with an added color dimension. Click sequence must be consistent, and both upper/lower sections must contain elements.
+1. **Base Password**: Factor A, the master password you remember.
+2. **Rule Phrase**: Factor C, any fixed string (no longer executable code!), e.g. `my-vault-v2`.
+3. **Interactive Color Grid (Path)**: Factor B, an Android-pattern-like colored grid; click order + colors form the path string and must match exactly for decryption.
+
+All three factors are folded into the KDF salt material (length-prefixed to avoid ambiguity). All are required; leaking any single one still leaves the other two. Every full guess by an attacker costs one Argon2id evaluation (256 MiB / 3 passes).
+
+## Ciphertext Format
+`WE1.<salt(16B,base64)>.<IV(12B,base64)>.<ciphertext(base64)>.<MAC(16B,base64)>`, with a random salt stored alongside.
+
+> ⚠️ **Compatibility**: `WE1.` ciphertexts are **incompatible** with the old multi-layer AES/ChaCha format. Decrypt old data with the old version first, then re-encrypt. The old layering was removed: it added no security while costing legitimate users (layers+1)× the KDF work per operation vs. 1× for an attacker.
 
 ## Password Generation
 The encryption interface includes an option to generate 8, 14, or 18-character random passwords.
 
-## Command Line Arguments
-On Windows, run `httpServer.exe` to automatically open the web interface. No certificate setup is required for basic usage - just double-click to run.
-
-### Important Notes
-1. **First Run Behavior**:
-   - Auto-generates certificate if `cert/cert.pem` doesn't exist
-   - Console remains visible during certificate generation
-   - Browser launches automatically after server starts
-
-2. **Security Notice**:
-   - Uses self-signed certificate (browsers will show security warnings)
-   - Use `--san` to add required domains/IPs
-   - Passwords are stored in `passwords.json`
-
-3. **Shutting Down**:
-   - Click [⫶] next to "Manager" and select "Shutdown"
-   - Low resource usage (~16MB RAM when idle)
-
----
-
-### 1. Console Management
-```bash
---hide-console
-```
-- **Purpose**: Hides console window after successful launch (Windows only)
-- **Behavior**:
-  - Console visible during startup
-  - Auto-hides after server initialization
-- **Example**:
-  ```bash
-  httpServer.exe --hide-console
-  ```
-
-### 2. Debug Mode
-```bash
---debug
-```
-- **Purpose**: Enables file logging
-- **Behavior**:
-  - Saves all server logs to `server.log`
-  - For troubleshooting
-- **Example**:
-  ```bash
-  httpServer.exe --debug
-  ```
-
-### 3. Certificate Generation Options
-Use these when generating new SSL certificates:
-
-```bash
--c, --country [Country Code]
-```
-- **Purpose**: 2-letter certificate country code
-- **Default**: `CN`
-- **Example**:
-  ```bash
-  httpServer.exe -c US
-  ```
-
-```bash
--s, --state [State/Province]
-```
-- **Purpose**: State/province name
-- **Default**: `Beijing`
-- **Example**:
-  ```bash
-  httpServer.exe -s "California"
-  ```
-
-```bash
--l, --locality [City]
-```
-- **Purpose**: City/locality name
-- **Default**: `Beijing`
-- **Example**:
-  ```bash
-  httpServer.exe -l "San Francisco"
-  ```
-
-```bash
--o, --org [Organization]
-```
-- **Purpose**: Organization name
-- **Default**: `My Test Company`
-- **Example**:
-  ```bash
-  httpServer.exe -o "Acme Corp"
-  ```
-
-```bash
---cn [Common Name]
-```
-- **Purpose**: Domain name (Common Name)
-- **Default**: `localhost`
-- **Example**:
-  ```bash
-  httpServer.exe --cn myserver.local
-  ```
-
-```bash
---san [SAN List]
-```
-- **Purpose**: Additional domains/IP addresses
-- **Default**: `localhost 127.0.0.1`
-- **Format**: Space-separated list
-- **Example**:
-  ```bash
-  httpServer.exe --san "myserver.local 192.168.1.100"
-  ```
-
-```bash
--d, --days [Validity]
-```
-- **Purpose**: Certificate validity (days)
-- **Default**: `365`
-- **Example**:
-  ```bash
-  httpServer.exe -d 730  # 2-year validity
-  ```
-
-### Complete Certificate Generation Example
-```bash
-httpServer.exe \
-  --country US \
-  --state "New York" \
-  --locality "New York City" \
-  --org "My Company" \
-  --cn myserver.local \
-  --san "myserver.local 192.168.1.100" \
-  --days 730
-```
 
 # Disclaimer
 This project was primarily developed using AI assistance. My role involved curation and implementation of the generated solutions.

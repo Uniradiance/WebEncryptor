@@ -11,26 +11,23 @@ const getElement = (id) => {
     return el;
 };
 
-// Input/Output Elements
+// Shared Input/Output Elements (merged Encrypt/Decrypt page)
 const plaintextInput = getElement('plaintext');
-const passwordEncryptInput = getElement('passwordEncrypt');
-const ruleEncryptInput = getElement('RuleEncrypt');
-const ChessboardEncryptInput = getElement('ChessboardEncrypt');
-const encryptButton = getElement('encryptButton');
-const ciphertextOutput = getElement('ciphertextOutput');
+const passwordInput = getElement('passwordEncrypt');
+const ruleInput = getElement('RuleEncrypt');
+const ChessboardInput = getElement('ChessboardEncrypt');
+const actionButton = getElement('actionButton');
+const cryptoOutput = getElement('cryptoOutput');
+const cryptoOutputHeading = getElement('cryptoOutputHeading');
 const copyCiphertextButton = getElement('copyCiphertextButton');
 const saveToManagerButton = getElement('saveToManagerButton');
-const toggleRuleEncrypt = getElement('toggleRuleEncrypt');
+const toggleRuleButton = getElement('toggleRuleEncrypt');
 
 const ciphertextInput = getElement('ciphertextInput');
-const ruleDecryptInput = getElement('RuleDecrypt');
-const ChessboardDecryptInput = getElement('ChessboardDecrypt');
-const passwordDecryptInput = getElement('passwordDecrypt');
-const decryptButton = getElement('decryptButton');
-const plaintextOutput = getElement('plaintextOutput');
-const toggleRuleDecrypt = getElement('toggleRuleDecrypt');
+const encryptCard = getElement('encryptCard');
+const decryptCard = getElement('decryptCard');
 
-// Generate Passworld Elements
+// Generate Password Elements
 const showGeneratePasswordModalButton = document.getElementById('showGeneratePasswordModalButton');
 const passwordGeneratorModal = document.getElementById('passwordGeneratorModal');
 const closePasswordModalButton = document.getElementById('closePasswordModalButton');
@@ -38,10 +35,11 @@ const modalOptionButtons = document.querySelectorAll('.modal-option-button');
 const pastePlaintextButton = document.getElementById('pastePlaintextButton');
 const pasteCiphertextButton = document.getElementById('pasteCiphertextButton');
 
-const passwordRetypeDialog = document.getElementById('passwordRetypeDialog');
-const closePasswordRetypeButton = document.getElementById('closePasswordRetypeButton');
-const passwordRetypeInput = document.getElementById('passwordRetypeInput');
-const confirmPasswordRetypeButton = document.getElementById('confirmPasswordRetypeButton');
+// Decryption Result Floating Window
+const decryptResultDialog = getElement('decryptResultDialog');
+const closeDecryptResultButton = getElement('closeDecryptResultButton');
+const decryptResultText = getElement('decryptResultText');
+const copyDecryptResultButton = getElement('copyDecryptResultButton');
 
 // UI State Elements
 const loadingIndicator = getElement('loadingIndicator');
@@ -52,6 +50,7 @@ const progressText = getElement('progressText');
 
 const tabs = document.querySelectorAll('.tab-button');
 const tabContents = document.querySelectorAll('.tab-content');
+const modeButtons = document.querySelectorAll('.mode-button');
 
 // Menu
 const moreOptionsBtn = document.getElementById('moreOptionsButton');
@@ -60,11 +59,8 @@ const shutdownButton = document.getElementById('shutdownButton');
 
 let cryptoWorker = null;
 
-// Store React component refs
-window.reactAppRefs = {
-    encryptBoard: React.createRef(),
-    decryptBoard: React.createRef()
-};
+// Current operation mode: 'encrypt' | 'decrypt'
+let currentMode = 'encrypt';
 
 function displayError(message) {
     errorDisplay.textContent = message;
@@ -78,8 +74,7 @@ function clearError() {
 }
 
 function resetUIState(errorMessage = null, successMessage = null) {
-    encryptButton.disabled = false;
-    decryptButton.disabled = false;
+    actionButton.disabled = false;
 
     setTimeout(() => {
         loadingIndicator.style.display = 'none';
@@ -116,10 +111,38 @@ function startProcessing(message) {
     progressBarContainer.style.display = 'block';
     progressBar.style.width = '0%';
     progressText.textContent = message;
-    encryptButton.disabled = true;
-    decryptButton.disabled = true;
+    actionButton.disabled = true;
 }
 
+// Switch between the mutually exclusive input panes (Data to Encrypt / Ciphertext).
+// Only visibility changes: textarea contents are preserved.
+function setMode(mode) {
+    currentMode = mode === 'decrypt' ? 'decrypt' : 'encrypt';
+    const isEncrypt = currentMode === 'encrypt';
+
+    modeButtons.forEach(btn => {
+        const isActive = btn.dataset.mode === currentMode;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+    encryptCard.classList.toggle('active', isEncrypt);
+    decryptCard.classList.toggle('active', !isEncrypt);
+
+    cryptoOutputHeading.textContent = isEncrypt ? 'Ciphertext (Base64):' : 'Decrypted Plaintext:';
+    cryptoOutput.setAttribute('aria-label', isEncrypt ? 'Encrypted ciphertext in Base64' : 'Decrypted plaintext');
+    actionButton.title = isEncrypt ? 'Encrypt Data' : 'Decrypt Data';
+    actionButton.setAttribute('aria-label', isEncrypt ? 'Encrypt data' : 'Decrypt data');
+    saveToManagerButton.style.display = isEncrypt ? '' : 'none';
+}
+
+// Expose it to global scope for other modules (e.g. Password Manager "Use for Decryption")
+window.switchCryptoMode = setMode;
+
+modeButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+        setMode(btn.dataset.mode);
+    });
+});
 
 function getChessboardData(boardId, type, isUpperHalf = false) {
     if (!window.reactAppRef || !window.reactAppRef.current) {
@@ -151,39 +174,30 @@ function getChessboardData(boardId, type, isUpperHalf = false) {
 
 function handleEncryptResponse(data) {
     if (data.status === 'success') {
-        const encryptedData = data.result;
-        ciphertextOutput.innerText = encryptedData; // Show encrypted data
-        passwordRetypeDialog.style.display = 'flex';
+        cryptoOutput.innerText = data.result; // Show encrypted data
+        resetUIState(null, 'Encryption successful.'); // No confirmation/verification step
     } else { // Encryption failed
-        ciphertextOutput.innerText = '';
+        cryptoOutput.innerText = '';
         resetUIState(`Encryption failed: ${data.error}`);
     }
 }
 
 function handleUserDecryptResponse(data) {
     if (data.status === 'success') {
-        plaintextOutput.innerText = data.result;
+        cryptoOutput.innerText = data.result;
         resetUIState();
+        showDecryptResult(data.result);
     } else {
-        plaintextOutput.innerText = '';
+        cryptoOutput.innerText = '';
         resetUIState(`Decryption failed: ${data.error}`);
     }
 }
 
-function handleVerifyResponse(data) {
-    if (data.status === 'success') {
-        loadingIndicator.textContent = "Verification successful.";
-        loadingIndicator.style.display = 'block';
-        setTimeout(() => {
-            if (loadingIndicator.textContent === "Verification successful.") {
-                loadingIndicator.style.display = 'none';
-            }
-        }, 1500);
-        resetUIState();
-    } else { // Verification (decryption step inside worker) failed
-        ciphertextOutput.innerText = '';
-        resetUIState(`Auto-decryption validation failed during decryption: ${data.error}. Ciphertext not shown.`);
-    }
+// Show the decryption result in a floating window (reuses the modal styles
+// previously used by the confirmation/verification step)
+function showDecryptResult(text) {
+    decryptResultText.innerText = text;
+    decryptResultDialog.style.display = 'flex';
 }
 
 function generateRandomPassword(length, includeSymbols = true) {
@@ -227,7 +241,7 @@ function initializeWorker() {
                     progressBar.style.width = `${percentage}%`;
                     progressText.textContent = stepName ? `${stepName} (${currentStep}/${totalSteps})` : `Step ${currentStep} of ${totalSteps}`;
                 }
-                // Buttons are already disabled by startProcessing
+                // Button is already disabled by startProcessing
                 return;
             }
 
@@ -239,9 +253,6 @@ function initializeWorker() {
                         break;
                     case 'decrypt': // This is for user-initiated decryption
                         handleUserDecryptResponse(e.data);
-                        break;
-                    case 'verify': // This is the response from auto-validation decryption
-                        handleVerifyResponse(e.data);
                         break;
                     case 'worker_init_sodium_ready':
                         break;
@@ -276,96 +287,93 @@ function initializeWorker() {
 
     } else {
         displayError('Web Workers are not supported in your browser. This application cannot function.');
-        encryptButton.disabled = true;
-        decryptButton.disabled = true;
+        actionButton.disabled = true;
         loadingIndicator.style.display = 'none';
     }
 }
 
 
-encryptButton.addEventListener('click', () => {
+function performEncrypt() {
     if (!cryptoWorker) {
         displayError("Crypto worker not initialized. Please refresh.");
         return;
     }
     const plaintext = plaintextInput.value;
-    const password = passwordEncryptInput.value;
-    const passwordTransformRuleJs = ruleEncryptInput.value;
+    const password = passwordInput.value;
+    const rulePhrase = ruleInput.value;
 
-    if (!plaintext || !password || !passwordTransformRuleJs) {
-        displayError('All fields for encryption (Data, Password, Nesting Rule) on Encrypt tab are required.');
+    if (!plaintext || !password || !rulePhrase) {
+        displayError('All fields for encryption (Data, Password, Rule Phrase) are required.');
         return;
     }
 
     try {
-        const path = getChessboardData('encryptBoard', 'full');
-        const upper = getChessboardData('encryptBoard', 'half', true);
-        const lower = getChessboardData('encryptBoard', 'half', false);
-
+        const path = getChessboardData('cryptoBoard', 'full');
         startProcessing('Encrypting...');
-        ciphertextOutput.innerText = ''; // Clear previous output
-
+        cryptoOutput.innerText = ''; // Clear previous output
         cryptoWorker.postMessage({
             action: 'encrypt',
             plaintext,
             password,
-            passwordTransformRuleJs,
+            rulePhrase,
             path,
-            upper,
-            lower,
         });
         window.reactAppRef.current.shuffleCellColors();
     } catch (err) {
         displayError(`Chessboard error for encryption: ${err.message}`);
     }
-});
+}
 
-decryptButton.addEventListener('click', () => {
+function performDecrypt() {
     if (!cryptoWorker) {
         displayError("Crypto worker not initialized. Please refresh.");
         return;
     }
     const ciphertext = ciphertextInput.value;
-    const password = passwordDecryptInput.value;
-    const passwordTransformRuleJs = ruleDecryptInput.value;
+    const password = passwordInput.value;
+    const rulePhrase = ruleInput.value;
 
-
-    if (!ciphertext || !password || !passwordTransformRuleJs) {
-        displayError('All fields for decryption (Ciphertext, Password, Nesting Rule) on Decrypt tab are required.');
+    if (!ciphertext || !password || !rulePhrase) {
+        displayError('All fields for decryption (Ciphertext, Password, Rule Phrase) are required.');
         return;
     }
 
     try {
-        const path = getChessboardData('decryptBoard', 'full');
-        const upper = getChessboardData('decryptBoard', 'half', true);
-        const lower = getChessboardData('decryptBoard', 'half', false);
-
+        const path = getChessboardData('cryptoBoard', 'full');
         startProcessing('Decrypting...');
-        plaintextOutput.innerText = ''; // Clear previous output
-
+        cryptoOutput.innerText = ''; // Clear previous output
         cryptoWorker.postMessage({
             action: 'decrypt',
             ciphertext,
             password,
-            passwordTransformRuleJs,
+            rulePhrase,
             path,
-            upper,
-            lower,
         });
         window.reactAppRef.current.shuffleCellColors();
     } catch (err) {
         displayError(`Chessboard error for decryption: ${err.message}`);
     }
+}
+
+actionButton.addEventListener('click', () => {
+    if (currentMode === 'encrypt') {
+        performEncrypt();
+    } else {
+        performDecrypt();
+    }
 });
 
+// Expose it to global scope for other modules (e.g. Password Manager "Use for Decryption")
+window.triggerDecrypt = performDecrypt;
+
 copyCiphertextButton.addEventListener('click', async () => {
-    if (!ciphertextOutput.innerText) {
-        displayError('No ciphertext to copy.');
-        setTimeout(() => { if (errorDisplay.textContent === 'No ciphertext to copy.') clearError(); }, 2000);
+    if (!cryptoOutput.innerText) {
+        displayError('No output to copy.');
+        setTimeout(() => { if (errorDisplay.textContent === 'No output to copy.') clearError(); }, 2000);
         return;
     }
     try {
-        await navigator.clipboard.writeText(ciphertextOutput.innerText);
+        await navigator.clipboard.writeText(cryptoOutput.innerText);
         copyCiphertextButton.disabled = true;
         loadingIndicator.textContent = "The copy has been successful.";
         loadingIndicator.style.display = 'block';
@@ -376,13 +384,13 @@ copyCiphertextButton.addEventListener('click', async () => {
             copyCiphertextButton.disabled = false;
         }, 1500);
     } catch (err) {
-        console.error('Failed to copy ciphertext: ', err);
-        displayError('Failed to copy ciphertext. Check console for details.');
+        console.error('Failed to copy output: ', err);
+        displayError('Failed to copy output. Check console for details.');
     }
 });
 
 saveToManagerButton.addEventListener('click', () => {
-    const ciphertext = ciphertextOutput.innerText;
+    const ciphertext = cryptoOutput.innerText;
     if (!ciphertext) {
         displayError('No ciphertext to save.');
         setTimeout(() => { if (errorDisplay.textContent === 'No ciphertext to save.') clearError(); }, 2000);
@@ -392,7 +400,7 @@ saveToManagerButton.addEventListener('click', () => {
     try {
         const newPasswordEntry = {
             name: `Encrypted Data (${new Date().toLocaleDateString()})`,
-            description: 'Saved from the Encrypt tab.',
+            description: 'Saved from the Encrypt/Decrypt page.',
             password: ciphertext
         };
 
@@ -423,6 +431,9 @@ closePasswordModalButton.addEventListener('click', () => {
 window.addEventListener('click', (event) => {
     if (event.target === passwordGeneratorModal) {
         passwordGeneratorModal.style.display = 'none';
+    }
+    if (event.target === decryptResultDialog) {
+        decryptResultDialog.style.display = 'none';
     }
     if (moreOptionsMenu.style.display === 'block') {
         moreOptionsMenu.style.display = 'none';
@@ -492,51 +503,29 @@ async function getClipboardText() {
     }
 }
 
-confirmPasswordRetypeButton.addEventListener('click', () => {
-    // 点击确认时执行验证逻辑
+closeDecryptResultButton.addEventListener('click', () => {
+    decryptResultDialog.style.display = 'none';
+});
+
+copyDecryptResultButton.addEventListener('click', async () => {
+    const text = decryptResultText.innerText;
+    if (!text) {
+        return;
+    }
     try {
-        // Parameters for verification from the DECRYPT tab
-        passwordRetypeDialog.style.display = 'none';
-
-        const encryptedData = ciphertextOutput.innerText;
-
-        const passwordForVerify = passwordRetypeInput.value;
-        const ruleForVerify = ruleEncryptInput.value;
-        const pathForVerify = getChessboardData('decryptBoard', 'full');
-        const upperForVerify = getChessboardData('decryptBoard', 'half', true);
-        const lowerForVerify = getChessboardData('decryptBoard', 'half', false);
-
-        if (!passwordForVerify || !ruleForVerify) {
-            resetUIState('Encryption Succeeded. Auto-validation skipped: Missing Password or Nesting Rule on Decrypt tab.');
-            return;
-        }
-        startProcessing('Validating encryption...');
-        cryptoWorker.postMessage({
-            action: 'verify',
-            ciphertext: encryptedData,
-            password: passwordForVerify,
-            passwordTransformRuleJs: ruleForVerify,
-            path: pathForVerify,
-            upper: upperForVerify,
-            lower: lowerForVerify
-        });
-
-        passwordRetypeInput.value = '';
-
-    } catch (err) { // Error getting chessboard data for verification or other setup issues
-        ciphertextOutput.innerText = encryptedData; // Show encrypted data if validation setup fails
-        resetUIState(`Encryption Succeeded. Auto-validation skipped: ${err.message}. Ensure Decrypt tab is correctly configured.`);
+        await navigator.clipboard.writeText(text);
+        const originalLabel = copyDecryptResultButton.textContent;
+        copyDecryptResultButton.textContent = 'Copied!';
+        setTimeout(() => {
+            copyDecryptResultButton.textContent = originalLabel;
+        }, 1500);
+    } catch (err) {
+        console.error('Failed to copy decryption result: ', err);
+        displayError('Failed to copy decryption result. Check console for details.');
     }
 });
 
-closePasswordRetypeButton.addEventListener('click', () => {
-    passwordRetypeDialog.style.display = 'none';
-    passwordRetypeInput.value = '';
-    // isPasswordConfirmed remains false, user needs to re-trigger confirmation.
-});
-
-showPassword(toggleRuleEncrypt, ruleEncryptInput);
-showPassword(toggleRuleDecrypt, ruleDecryptInput);
+showPassword(toggleRuleButton, ruleInput);
 
 function showPassword(eyeIcon, Input) {
     // 鼠标按下时显示密码
@@ -583,8 +572,7 @@ function switchToTab(tabId) {
     });
     // Reset UI state when switching tabs
     resetUIState();
-    ciphertextOutput.innerText = '';
-    plaintextOutput.innerText = '';
+    cryptoOutput.innerText = '';
 }
 // Expose it to global scope for other modules
 window.switchToTab = switchToTab;
@@ -596,15 +584,12 @@ tabs.forEach(tab => {
     });
 });
 
-// Initialize React Components
-const cell_encrypt_root = ReactDOM.createRoot(ChessboardEncryptInput);
-const cell_decrypt_root = ReactDOM.createRoot(ChessboardDecryptInput);
+// Initialize React Component (single shared chessboard)
+const cell_root = ReactDOM.createRoot(ChessboardInput);
+cell_root.render(React.createElement(App));
 
-// Pass refs to App component instances
-const AppInstanceEncrypt = React.createElement(App);
-
-cell_encrypt_root.render(AppInstanceEncrypt);
-cell_decrypt_root.render(AppInstanceEncrypt);
+// Ensure UI reflects the initial mode (encrypt)
+setMode('encrypt');
 
 // Initialize the worker last, after UI is set up
 initializeWorker();

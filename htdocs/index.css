@@ -582,8 +582,26 @@ h2 {
 }
 
 .pm-card.editing .edit-btn,
-.pm-card.editing .use-for-decrypt-btn,
 .pm-card.editing .delete-btn {
+    display: none;
+}
+
+/* Use-for-decrypt button: two roles with distinct icons.
+   Normal (view) mode -> decrypt directly (lock-open icon).
+   Edit mode -> jump to the decryption tab (plane icon). */
+.use-for-decrypt-btn .icon-jump {
+    display: none;
+}
+
+.use-for-decrypt-btn .icon-decrypt {
+    display: block;
+}
+
+.pm-card.editing .use-for-decrypt-btn .icon-jump {
+    display: block;
+}
+
+.pm-card.editing .use-for-decrypt-btn .icon-decrypt {
     display: none;
 }
 
@@ -655,4 +673,139 @@ h2 {
 /* Estilo de Foco para Accesibilidad */
 .toggle-rule-button:focus-visible {
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); /* Anillo de foco azul */
+}
+
+/* Merged Encrypt/Decrypt page: input card with mutually exclusive panes */
+.input-card {
+    display: flex;
+    align-items: stretch;
+    background-color: #ffffff;
+    padding: 1rem;
+    border: 1px solid #ddd;
+    border-radius: 0.5rem;
+    box-shadow: 0 5px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    margin-top: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.input-panes {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Vertical mode switch on the right edge of the card (rotated 90 degrees) */
+.mode-switch-wrap {
+    position: relative;
+    flex: 0 0 2rem;
+    align-self: stretch;
+    min-height: 10rem; /* Ensures the rotated switch fits inside the card */
+}
+
+.mode-switch {
+    position: absolute;
+    bottom: 26%;
+    left: 80%;
+    transform: translate(-50%, -50%) rotate(90deg);
+    transform-origin: center;
+    white-space: nowrap;
+    display: inline-flex;
+    background-color: #eef1f4;
+    border-radius: 0.5rem;
+    padding: 0.25rem;
+    gap: 0.25rem;
+}
+
+.mode-button {
+    padding: 0.35rem 0.7rem;
+    border: none;
+    background-color: transparent;
+    border-radius: 0.375rem;
+    font-size: 0.85em;
+    font-weight: 500;
+    font-family: inherit;
+    color: #7f8c8d;
+    cursor: pointer;
+    transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+.mode-button:hover:not(.active) {
+    color: #3498db;
+}
+
+.mode-button.active {
+    background-color: #ffffff;
+    color: #3498db;
+    font-weight: bold;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.input-pane {
+    display: none;
+}
+
+.input-pane.active {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    animation: fadeIn 0.3s ease;
+}
+
+.input-pane-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 8px;
+}
+
+.input-pane-header label {
+    font-weight: bold;
+    color: #555;
+}
+
+.input-pane-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.input-pane-body textarea {
+    flex: 1;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    font-size: 0.95em;
+    resize: vertical;
+    min-height: 60px;
+    box-sizing: border-box;
+    transition: border-color 0.3s ease;
+}
+
+.input-pane-body textarea:focus {
+    border-color: #3498db;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+}
+
+/* Shared secret factors section */
+.shared-factors {
+    border-top: 2px solid #eee;
+    padding-top: 1.25rem;
+    margin-top: 0.25rem;
+}
+
+/* Output area card (ciphertext / plaintext result) */
+.output-card {
+    background-color: #ffffff;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 5px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    margin-top: 0.5rem;
+    margin-bottom: 1rem;
+    position: relative;
 }

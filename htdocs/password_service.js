@@ -11,20 +11,45 @@
 class PasswordService {
 
     /**
+     * 服务器 API 访问令牌 (localStorage 持久化)。
+     * 服务器以 --token 启动时需要, 否则 API 会返回 401。
+     */
+    _getToken() {
+        return localStorage.getItem('webencryptor_token') || '';
+    }
+
+    _setToken(token) {
+        if (token) localStorage.setItem('webencryptor_token', token.trim());
+        else localStorage.removeItem('webencryptor_token');
+    }
+
+    /**
      * A private helper to handle fetch requests and error handling.
      * @param {string} url - The URL to fetch.
      * @param {object} options - The options for the fetch call.
+     * @param {boolean} retried - Internal: whether a 401 retry was already attempted.
      * @returns {Promise<any>} The JSON response from the server.
      */
-    async _fetch(url, options = {}) {
+    async _fetch(url, options = {}, retried = false) {
         try {
             const response = await fetch(url, {
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
+                    ...(this._getToken() ? { 'X-Auth-Token': this._getToken() } : {}),
                 },
                 ...options,
             });
+
+            // 401: 令牌缺失或错误 → 提示输入一次 (保存在 localStorage)
+            if (response.status === 401 && !retried) {
+                const token = prompt('服务器要求访问令牌 (X-Auth-Token)。\n启动服务器时控制台会显示令牌; 输入后本浏览器会记住它:');
+                if (token && token.trim()) {
+                    this._setToken(token);
+                    return this._fetch(url, options, true);
+                }
+                throw new Error('未提供访问令牌, API 请求被拒绝 (401)。请在服务器控制台查看 --token 值。');
+            }
 
             if (!response.ok) {
                 const errorText = await response.text().catch(() => 'Could not read error response.');
