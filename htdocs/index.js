@@ -4,6 +4,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.js'; // Ensure .js extension
 import { passwordService } from './password_service.js';
+import { createSignaturePad } from './SignaturePad.js';
 
 const getElement = (id) => {
     const el = document.getElementById(id);
@@ -14,14 +15,12 @@ const getElement = (id) => {
 // Shared Input/Output Elements (merged Encrypt/Decrypt page)
 const plaintextInput = getElement('plaintext');
 const passwordInput = getElement('passwordEncrypt');
-const ruleInput = getElement('RuleEncrypt');
 const ChessboardInput = getElement('ChessboardEncrypt');
 const actionButton = getElement('actionButton');
 const cryptoOutput = getElement('cryptoOutput');
 const cryptoOutputHeading = getElement('cryptoOutputHeading');
 const copyCiphertextButton = getElement('copyCiphertextButton');
 const saveToManagerButton = getElement('saveToManagerButton');
-const toggleRuleButton = getElement('toggleRuleEncrypt');
 
 const ciphertextInput = getElement('ciphertextInput');
 const encryptCard = getElement('encryptCard');
@@ -143,6 +142,18 @@ modeButtons.forEach(btn => {
         setMode(btn.dataset.mode);
     });
 });
+
+// --- 规则因子 (因子 C): 手绘图案 → 四方向链码序列 ---
+const signaturePadCrypto = getElement('signaturePadCrypto');
+const sigPad = createSignaturePad(signaturePadCrypto);
+
+function getRuleFactor() {
+    const seq = sigPad.getSequence();
+    if (!seq) {
+        return { ok: false, error: sigPad.getStatus() || '请先在画板上画出图案（至少 10 段直线段）' };
+    }
+    return { value: seq, ok: true };
+}
 
 function getChessboardData(boardId, type, isUpperHalf = false) {
     if (!window.reactAppRef || !window.reactAppRef.current) {
@@ -300,10 +311,14 @@ function performEncrypt() {
     }
     const plaintext = plaintextInput.value;
     const password = passwordInput.value;
-    const rulePhrase = ruleInput.value;
 
-    if (!plaintext || !password || !rulePhrase) {
-        displayError('All fields for encryption (Data, Password, Rule Phrase) are required.');
+    if (!plaintext || !password) {
+        displayError('Data and Password are required for encryption.');
+        return;
+    }
+    const factor = getRuleFactor();
+    if (!factor.ok) {
+        displayError(`Rule Factor: ${factor.error}`);
         return;
     }
 
@@ -315,7 +330,7 @@ function performEncrypt() {
             action: 'encrypt',
             plaintext,
             password,
-            rulePhrase,
+            rulePhrase: factor.value,
             path,
         });
         window.reactAppRef.current.shuffleCellColors();
@@ -331,10 +346,14 @@ function performDecrypt() {
     }
     const ciphertext = ciphertextInput.value;
     const password = passwordInput.value;
-    const rulePhrase = ruleInput.value;
 
-    if (!ciphertext || !password || !rulePhrase) {
-        displayError('All fields for decryption (Ciphertext, Password, Rule Phrase) are required.');
+    if (!ciphertext || !password) {
+        displayError('Ciphertext and Password are required for decryption.');
+        return;
+    }
+    const factor = getRuleFactor();
+    if (!factor.ok) {
+        displayError(`Rule Factor: ${factor.error}`);
         return;
     }
 
@@ -346,7 +365,7 @@ function performDecrypt() {
             action: 'decrypt',
             ciphertext,
             password,
-            rulePhrase,
+            rulePhrase: factor.value,
             path,
         });
         window.reactAppRef.current.shuffleCellColors();
@@ -525,26 +544,6 @@ copyDecryptResultButton.addEventListener('click', async () => {
     }
 });
 
-showPassword(toggleRuleButton, ruleInput);
-
-function showPassword(eyeIcon, Input) {
-    // 鼠标按下时显示密码
-    eyeIcon.addEventListener('mouseup', () => {
-        Input.type = 'text';
-        Input.focus();
-    });
-
-    // 触摸开始时显示密码 (移动设备)
-    eyeIcon.addEventListener('touchend', () => {
-        Input.type = 'text';
-        Input.focus();
-    });
-
-    // 输入框失去焦点隐藏密码
-    Input.addEventListener('blur', () => {
-        Input.type = 'password';
-    });
-}
 function switchToTab(tabId) {
     tabs.forEach(t => {
         if (t.dataset.tab === tabId) {

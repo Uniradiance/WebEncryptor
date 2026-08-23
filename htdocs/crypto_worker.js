@@ -5,7 +5,7 @@
 // 方案 (三因子 + 单层 AEAD):
 //   因子 A: 主口令 (password)
 //   因子 B: 棋盘路径序列 (path, 来自 Interactive Color Grid 的点击顺序 + 颜色)
-//   因子 C: 规则短语 (rulePhrase, 任意固定字符串, 不再是可执行代码)
+//   因子 C: 手绘图案方向序列 (rulePhrase, 画板识别出的 U/R/D/L 链码字符串)
 //
 //   1. 每次加密生成 16 字节随机盐 randomSalt, 随密文一起存储
 //   2. saltMaterial = u32len(rulePhrase) ‖ rulePhrase ‖ u32len(path) ‖ path ‖ randomSalt
@@ -63,7 +63,7 @@ const KEY_LENGTH = 32;                 // 256-bit
 const TAG_LENGTH = 16;                 // 128-bit MAC
 const HKDF_INFO = 'WebEncryptor:enc:v1';
 const AAD = new TextEncoder().encode('WebEncryptor:v1');
-const MAX_RULE_LENGTH = 2048;          // 规则短语长度上限 (字符)
+const MAX_RULE_LENGTH = 2048;          // 图案序列长度上限 (字符)
 const MAX_PATH_LENGTH = 65536;         // 棋盘路径字符串长度上限 (字符)
 const MAX_PASSWORD_LENGTH = 4096;      // 口令长度上限 (字符)
 
@@ -195,7 +195,7 @@ async function decryptString(ciphertextStr, passwordStr, rulePhraseStr, pathStr)
     key.fill(0); // 尽力清零
 
     if (plaintext === null) { // Sodium returns null on decryption/verification failure
-        throw new Error('解密失败: 口令、规则短语或棋盘不匹配, 或密文已被篡改。');
+        throw new Error('解密失败: 口令、图案或棋盘不匹配, 或密文已被篡改。');
     }
     return textDecoder.decode(plaintext);
 }
@@ -208,7 +208,7 @@ self.onmessage = async (e) => {
     const plaintext = data.plaintext;
     const ciphertext = data.ciphertext;
     const password = data.password;
-    // 规则短语与棋盘作为密钥因子: 去除首尾空白, 避免"多打一个空格导致解密失败"
+    // 图案序列与棋盘作为密钥因子: 去除首尾空白, 避免"多一个空格导致解密失败"
     const rulePhrase = typeof data.rulePhrase === 'string' ? data.rulePhrase.trim() : data.rulePhrase;
     const path = typeof data.path === 'string' ? data.path.trim() : data.path;
 
@@ -220,19 +220,19 @@ self.onmessage = async (e) => {
 
         if (action === 'encrypt') {
             if (!plaintext || !password || !rulePhrase || !path) {
-                throw new Error("加密参数缺失: 明文、口令、规则短语、棋盘均不能为空。");
+                throw new Error("加密参数缺失: 明文、口令、图案、棋盘均不能为空。");
             }
             if (password.length > MAX_PASSWORD_LENGTH || rulePhrase.length > MAX_RULE_LENGTH || path.length > MAX_PATH_LENGTH) {
-                throw new Error(`输入过长: 口令≤${MAX_PASSWORD_LENGTH}, 规则短语≤${MAX_RULE_LENGTH}, 棋盘≤${MAX_PATH_LENGTH} 字符。`);
+                throw new Error(`输入过长: 口令≤${MAX_PASSWORD_LENGTH}, 图案≤${MAX_RULE_LENGTH}, 棋盘≤${MAX_PATH_LENGTH} 字符。`);
             }
             const result = await encryptString(plaintext, password, rulePhrase, path);
             responsePayload = { status: 'success', action, result };
         } else if (action === 'decrypt' || action === 'verify') {
             if (!ciphertext || !password || !rulePhrase || !path) {
-                throw new Error("解密参数缺失: 密文、口令、规则短语、棋盘均不能为空。");
+                throw new Error("解密参数缺失: 密文、口令、图案、棋盘均不能为空。");
             }
             if (password.length > MAX_PASSWORD_LENGTH || rulePhrase.length > MAX_RULE_LENGTH || path.length > MAX_PATH_LENGTH) {
-                throw new Error(`输入过长: 口令≤${MAX_PASSWORD_LENGTH}, 规则短语≤${MAX_RULE_LENGTH}, 棋盘≤${MAX_PATH_LENGTH} 字符。`);
+                throw new Error(`输入过长: 口令≤${MAX_PASSWORD_LENGTH}, 图案≤${MAX_RULE_LENGTH}, 棋盘≤${MAX_PATH_LENGTH} 字符。`);
             }
             const result = await decryptString(ciphertext, password, rulePhrase, path);
             responsePayload = { status: 'success', action, result };
