@@ -197,7 +197,6 @@ function handleUserDecryptResponse(data) {
     if (data.status === 'success') {
         cryptoOutput.innerText = data.result;
         resetUIState();
-        showDecryptResult(data.result);
     } else {
         cryptoOutput.innerText = '';
         resetUIState(`Decryption failed: ${data.error}`);
