@@ -901,20 +901,34 @@ h2 {
 .sigpad-feedback.masked {
     color: #9ca3af;
 }
+/* 撤销/清除: 图标按钮 (与棋盘操作按钮风格一致: 透明底 + 靛蓝色) */
+.sigpad-undo,
 .sigpad-clear {
     flex-shrink: 0;
-    padding: 0.25rem 0.75rem;
-    font-size: 0.8rem;
-    border: 1px solid #d1d5db;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem;
+    background-color: transparent;
+    color: #818cf8;
+    border: none;
     border-radius: 0.375rem;
-    background: #f9fafb;
-    color: #4b5563;
     cursor: pointer;
+    opacity: 1;
+    transition: background-color 0.15s ease-in-out, color 0.15s ease-in-out;
 }
-.sigpad-clear:hover {
-    background: #fef2f2;
-    border-color: #fca5a5;
-    color: #dc2626;
+.sigpad-undo:hover:not(:disabled),
+.sigpad-clear:hover:not(:disabled) {
+    background-color: rgba(129, 140, 248, 0.15);
+    color: #a5b4fc;
+}
+.sigpad-undo:disabled,
+.sigpad-clear:disabled {
+    color: #6b7280;
+    cursor: not-allowed;
+    opacity: 0.5;
 }
 .sigpad-confirm {
     flex-shrink: 0;

@@ -49,8 +49,18 @@ export function createSignaturePad(container, options = {}) {
                             <circle cx="12" cy="12" r="3"></circle>
                         </svg>
                     </button>
-                    <button type="button" class="sigpad-undo" title="Undo the last stroke">Undo</button>
-                    <button type="button" class="sigpad-clear" title="Clear everything and redraw">Clear</button>
+                    <button type="button" class="sigpad-undo" title="Undo the last stroke" aria-label="Undo the last stroke">
+                        <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 0 24 24" width="20px" fill="currentColor" aria-hidden="true">
+                            <path d="M0 0h24v24H0V0z" fill="none"></path>
+                            <path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"></path>
+                        </svg>
+                    </button>
+                    <button type="button" class="sigpad-clear" title="Clear everything and redraw" aria-label="Clear everything and redraw">
+                        <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 0 24 24" width="20px" fill="currentColor" aria-hidden="true">
+                            <path d="M0 0h24v24H0V0z" fill="none"></path>
+                            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"></path>
+                        </svg>
+                    </button>
                     <button type="button" class="sigpad-confirm" title="Confirm: erase the ink and stamp the pad" disabled>Confirm</button>
                 </span>
             </div>
