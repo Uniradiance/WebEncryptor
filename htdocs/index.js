@@ -193,13 +193,28 @@ function handleEncryptResponse(data) {
     }
 }
 
+// Who initiated the decryption: the crypto tab itself, or the Password
+// Manager card's "Decrypt" button. The floating result window (modal) is only
+// shown for the manager flow; the crypto tab shows the result inline.
+let decryptOrigin = 'crypto'; // 'crypto' | 'manager'
+
 function handleUserDecryptResponse(data) {
+    if (decryptOrigin !== 'manager') {
+        // Crypto tab flow: never show the floating window (close a leftover one).
+        decryptResultDialog.style.display = 'none';
+    }
     if (data.status === 'success') {
         cryptoOutput.innerText = data.result;
         resetUIState();
+        if (decryptOrigin === 'manager') {
+            showDecryptResult(data.result);
+        }
     } else {
         cryptoOutput.innerText = '';
         resetUIState(`Decryption failed: ${data.error}`);
+        if (decryptOrigin === 'manager') {
+            showDecryptResult(`Decryption failed: ${data.error}`);
+        }
     }
 }
 
@@ -392,8 +407,13 @@ actionButton.addEventListener('click', () => {
     }
 });
 
-// Expose it to global scope for other modules (e.g. Password Manager "Use for Decryption")
-window.triggerDecrypt = performDecrypt;
+// Expose it to global scope for other modules (e.g. Password Manager "Use for Decryption").
+// Pass true when the Password Manager card starts the decryption: the result
+// (or the error) is then shown in the floating result window (modal).
+window.triggerDecrypt = (fromManager = false) => {
+    decryptOrigin = fromManager ? 'manager' : 'crypto';
+    performDecrypt();
+};
 
 copyCiphertextButton.addEventListener('click', async () => {
     if (!cryptoOutput.innerText) {

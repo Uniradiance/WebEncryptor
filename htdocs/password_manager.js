@@ -172,8 +172,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     // 1. Set the value (used by the decryption step)
                     ciphertextInput.value = passwordData.password;
 
-                    // 2. Directly run the decryption step; the result is shown in a floating window
-                    window.triggerDecrypt();
+                    // 2. Run the decryption from the manager flow: the result is
+                    //    shown in the floating result window (modal), not inline.
+                    window.triggerDecrypt(true);
                 } else {
                     if (!ciphertextInput) {
                         alert('Could not find the decryption input field.');
