@@ -43,6 +43,7 @@
 ### 测试
 ```bash
 node test/recognition_test.mjs     # 稳健性回归 + JS/WASM 精确一致性(parity) + 性能
+node test/sigpad_replay_test.mjs   # SignaturePad 状态一致性回归 (提交/撤销/异常注入/引擎防御)
 cargo test --manifest-path rust/recognition/Cargo.toml   # Rust 侧单元测试
 ```
 浏览器手动稳定性测试：打开 `htdocs/pad-tester.html`，连画 10 次看一致率（先热身 1~2 次）。

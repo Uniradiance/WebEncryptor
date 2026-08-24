@@ -54,15 +54,22 @@ function ensureBuf(n) {
   if (n > bufCap) {
     if (bufPtr !== 0) wasm.dealloc(bufPtr, bufCap * 16);
     bufCap = Math.max(64, n + 64);
-    bufPtr = wasm.alloc(bufCap * 16);
+    const p = wasm.alloc(bufCap * 16);
+    bufPtr = p ? p : 0;
+    if (!bufPtr) bufCap = 0; // failed (OOM): retry on the next call
   }
   return bufPtr;
 }
 
-/** Run the Rust core over raw points with effective options. */
+/** Run the Rust core over raw points with effective options.
+ *  Total: never throws. An ABI anomaly (bad pointer/length) or allocation
+ *  failure is normalized to REF.EMPTY so the caller's stroke/recognition
+ *  state can never drift apart. */
 function extractWasm(rawPoints, o) {
   const n = rawPoints.length;
+  if (n < 2 || !wasm) return REF.EMPTY;
   const ptr = ensureBuf(n);
+  if (!ptr) return REF.EMPTY; // alloc failed: never write into memory[0]
   // Re-create the view each call: the ArrayBuffer may be detached/regrown by
   // wasm allocation beyond linear-memory growth.
   const view = new Float64Array(wasm.memory.buffer, ptr, n * 2);
@@ -86,16 +93,22 @@ function extractWasm(rawPoints, o) {
     o.betweenRatio,
     o.betweenStrong,
   );
-  if (resPtr === 0) return REF.EMPTY;
-  const dv = new DataView(wasm.memory.buffer, resPtr, 24);
+  // Bounds-check the ABI against the *current* linear memory before reading.
+  const buf = wasm.memory.buffer;
+  if (!resPtr || resPtr + 24 > buf.byteLength) return REF.EMPTY;
+  const dv = new DataView(buf, resPtr, 24);
   const seqPtr = dv.getUint32(0, true);
   const seqLen = dv.getUint32(4, true);
   const count = dv.getUint32(8, true);
   const empty = dv.getUint8(13, true) !== 0;
   const segPtr = dv.getUint32(16, true);
   if (count === 0) return REF.EMPTY;
-  const sequence = textDecoder.decode(new Uint8Array(wasm.memory.buffer, seqPtr, seqLen));
-  const segDv = new DataView(wasm.memory.buffer, segPtr, count * 8);
+  // Only bounds-check against linear memory: the seq/seg buffers are separate
+  // allocations with no ordering guarantee relative to the result struct.
+  if (seqPtr + seqLen > buf.byteLength) return REF.EMPTY;
+  if (segPtr + count * 8 > buf.byteLength) return REF.EMPTY;
+  const sequence = textDecoder.decode(new Uint8Array(buf, seqPtr, seqLen));
+  const segDv = new DataView(buf, segPtr, count * 8);
   const segments = new Array(count);
   for (let i = 0; i < count; i++) {
     segments[i] = {
@@ -106,12 +119,38 @@ function extractWasm(rawPoints, o) {
   return { sequence, segments, count, empty };
 }
 
-/** Public core: WASM when ready, otherwise the parity JS reference. */
+let extractionWarned = false;
+function warnExtraction(msg, err) {
+  if (extractionWarned) return;
+  extractionWarned = true;
+  console.warn("recognition_engine: " + msg, err && err.message ? err.message : err);
+}
+
+/** Public core: WASM when ready, otherwise the parity JS reference.
+ *  Total: never throws. A failure is retried on the parity JS reference and,
+ *  if that fails too, normalized to REF.EMPTY -- so callers can keep their
+ *  stroke list and the recognition cache in sync no matter what happens. */
 export function extractStrokeSegments(rawPoints, opts) {
   const o = Object.assign({}, REF.DEFAULTS, opts || {});
   if (!rawPoints || rawPoints.length < 2) return REF.EMPTY;
-  if (wasm) return extractWasm(rawPoints, o);
-  return REF.extractStrokeSegments(rawPoints, o);
+  // Pointer events always produce finite coordinates; normalize anything else
+  // up front instead of letting NaN/±Infinity reach either core.
+  for (let i = 0; i < rawPoints.length; i++) {
+    const p = rawPoints[i];
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return REF.EMPTY;
+  }
+  try {
+    if (wasm) return extractWasm(rawPoints, o);
+    return REF.extractStrokeSegments(rawPoints, o);
+  } catch (err) {
+    warnExtraction("extraction failed; retrying with the parity JS reference:", err);
+    try {
+      return REF.extractStrokeSegments(rawPoints, o);
+    } catch (err2) {
+      warnExtraction("JS reference extraction failed too; treating the stroke as empty:", err2);
+      return REF.EMPTY;
+    }
+  }
 }
 
 /** Pattern-level recognition (aggregation lives in JS). */

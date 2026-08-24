@@ -19,6 +19,12 @@
 // Performance: an offscreen canvas holds the committed strokes (drawn once per
 // stroke), so per-frame redraws blit it instead of re-tracing every committed
 // polyline; the incremental recognizer only recomputes the stroke in progress.
+//
+// State invariant: 'strokes' is the single source of truth for the pattern.
+// The recognition cache is rebuilt from it whenever a mutation happens
+// (undo/clear) or a stroke commit fails, so the feedback sequence and the
+// canvas can never drift apart (no 'phantom' stroke that is visible but
+// unrecorded, and no undo-off-by-one).
 
 import {
   createIncrementalRecognizer,
@@ -86,7 +92,9 @@ export function createSignaturePad(container, options = {}) {
 
   // Incremental recognizer: committed strokes cached, only the current stroke
   // is recomputed per frame.
-  const rec = createIncrementalRecognizer({ minSegments });
+  // 'options.recognizer' is a test-only factory hook (e.g. to inject extraction
+  // failures); the default builds the real engine.
+  const rec = (options.recognizer || createIncrementalRecognizer)({ minSegments });
 
   // --- canvas sizing (devicePixelRatio aware) ---
   const resize = () => {
@@ -249,6 +257,22 @@ export function createSignaturePad(container, options = {}) {
     }
   };
 
+  // Rebuild the recognition cache from 'strokes' (the single source of truth
+  // for the pattern). Keeps the recognizer in sync no matter what happened
+  // before (e.g. a failed commit); cheap: only runs on undo/clear/commit-fail.
+  const resyncRec = () => {
+    rec.clear();
+    for (const s of strokes) {
+      try {
+        rec.addStroke(s);
+      } catch (err) {
+        // The engine never throws (it normalizes to EMPTY). Last resort; keep
+        // the remaining strokes recognizable.
+        console.warn('signature pad: failed to re-recognize a stroke', err);
+      }
+    }
+  };
+
   canvas.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     if (drawing || signed) return;
@@ -273,12 +297,19 @@ export function createSignaturePad(container, options = {}) {
   const endStroke = () => {
     if (!drawing || !current) return;
     drawing = false;
-    strokes.push(current); // accumulate: the next stroke appends to the pattern
-    rec.addStroke(current); // commit: result enters the cache
+    const s = current; // capture; commit is all-or-nothing below
     current = null;
-    const last = strokes[strokes.length - 1];
-    drawPolyline(offCtx, last); // update the redraw cache once
-    if (showDirections) drawDirectionArrows(offCtx, last);
+    strokes.push(s); // accumulate: the next stroke appends to the pattern
+    try {
+      rec.addStroke(s); // commit: result enters the cache (engine never throws)
+    } catch (err) {
+      // Safety net: rebuild the cache from 'strokes' so the recognizer stays
+      // in sync even after an interrupted commit (no phantom stroke).
+      console.warn('signature pad: stroke commit failed; resyncing', err);
+      resyncRec();
+    }
+    drawPolyline(offCtx, s); // update the redraw cache once
+    if (showDirections) drawDirectionArrows(offCtx, s);
     compute();
     scheduleHide();
   };
@@ -288,7 +319,7 @@ export function createSignaturePad(container, options = {}) {
   undoBtn.addEventListener("click", () => {
     if (drawing || signed) return;
     strokes.pop();
-    rec.removeLast();
+    resyncRec(); // 'strokes' is the source of truth: heals any prior drift
     renderOffscreen();
     redraw();
     compute();
@@ -306,7 +337,7 @@ export function createSignaturePad(container, options = {}) {
     cancelHide();
     sigpadEl.classList.remove("signed");
     stamp.hidden = true;
-    rec.clear();
+    resyncRec(); // strokes is empty -> clears the recognition cache too
     renderOffscreen();
     redraw();
     updateFeedback();
