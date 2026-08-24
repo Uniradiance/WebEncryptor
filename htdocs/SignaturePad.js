@@ -50,16 +50,10 @@ export function createSignaturePad(container, options = {}) {
                         </svg>
                     </button>
                     <button type="button" class="sigpad-undo" title="Undo the last stroke" aria-label="Undo the last stroke">
-                        <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 0 24 24" width="20px" fill="currentColor" aria-hidden="true">
-                            <path d="M0 0h24v24H0V0z" fill="none"></path>
-                            <path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"></path>
-                        </svg>
+                    <svg t="1787562257241" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="20463" width="32" height="32"><path d="M170.666667 469.333333a42.666667 42.666667 0 0 0-42.666667 42.666667 42.666667 42.666667 0 0 0 42.666667 42.666667h512c71.210667 0 128 56.789333 128 128v85.333333a42.666667 42.666667 0 0 0 42.666666 42.666667 42.666667 42.666667 0 0 0 42.666667-42.666667v-85.333333c0-117.333333-96-213.333333-213.333333-213.333334z" p-id="20464"></path><path d="M384 256a42.666667 42.666667 0 0 0-30.165333 12.501333l-213.333334 213.333334a42.666667 42.666667 0 0 0 0 60.330666l213.333334 213.333334a42.666667 42.666667 0 0 0 60.330666 0 42.666667 42.666667 0 0 0 0-60.330667L230.997333 512l183.168-183.168a42.666667 42.666667 0 0 0 0-60.330667A42.666667 42.666667 0 0 0 384 256z" p-id="20465"></path></svg>
                     </button>
                     <button type="button" class="sigpad-clear" title="Clear everything and redraw" aria-label="Clear everything and redraw">
-                        <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 0 24 24" width="20px" fill="currentColor" aria-hidden="true">
-                            <path d="M0 0h24v24H0V0z" fill="none"></path>
-                            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"></path>
-                        </svg>
+                        <svg t="1787562970259" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="10510" width="32" height="32"><path d="M634.5728 118.1184l319.3856 320.0512a75.5712 75.5712 0 0 1 0 106.7008l-318.464 319.1296h308.48a32 32 0 0 1 4.7616 63.6416l-4.7616 0.3584H80.0256a32 32 0 0 1-4.7104-63.6416l4.7616-0.3584h231.6288l-209.8688-212.48a75.5712 75.5712 0 0 1 0.256-106.3936l426.0864-427.008a75.1616 75.1616 0 0 1 106.496 0zM282.112 455.2704L147.4048 590.336a11.5712 11.5712 0 0 0-1.8944 13.824l1.8432 2.4064 254.2592 257.3824h143.616l73.8816-74.0864L282.112 455.2704z" fill="#1D2129" p-id="10511"></path></svg>
                     </button>
                     <button type="button" class="sigpad-confirm" title="Confirm: erase the ink and stamp the pad" disabled>Confirm</button>
                 </span>
