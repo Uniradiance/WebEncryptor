@@ -10,4 +10,14 @@ node_modules/
 .npm-cache/
 package-lock.json
 .gocache/
+.gopath/
 .testrun/
+rust/recognition/target/
+.rust-sysroot/
+.rustup/
+.cargo/
+rust-std-wasm32.tar.xz
+rustup.sh
+rustup-init
+.we-server
+rustc-shim

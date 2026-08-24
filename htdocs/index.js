@@ -143,14 +143,14 @@ modeButtons.forEach(btn => {
     });
 });
 
-// --- 规则因子 (因子 C): 手绘图案 → 四方向链码序列 ---
+// --- rule factor (factor C): hand-drawn pattern -> chain-code sequence ---
 const signaturePadCrypto = getElement('signaturePadCrypto');
 const sigPad = createSignaturePad(signaturePadCrypto);
 
 function getRuleFactor() {
     const seq = sigPad.getSequence();
     if (!seq) {
-        return { ok: false, error: sigPad.getStatus() || '请先在画板上画出图案（至少 10 段直线段）' };
+        return { ok: false, error: sigPad.getStatus() || 'Draw your pattern on the pad first (at least 10 segments).' };
     }
     return { value: seq, ok: true };
 }
@@ -211,24 +211,24 @@ function showDecryptResult(text) {
 }
 
 function generateRandomPassword(length, includeSymbols = true) {
-    // 定义字符集
+    // character set
     const lowercase = 'abcdefghijklmnopqrstuvwxyz';
     const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const numbers = '0123456789';
     const symbols = '^*_+-=.<>';
 
-    // 组合基础字符集
+    // combined base charset
     let charset = lowercase + uppercase + numbers;
     if (includeSymbols) charset += symbols;
 
-    // 创建随机值数组
+    // random values
     const randomValues = new Uint32Array(length);
     crypto.getRandomValues(randomValues);
 
-    // 生成密码
+    // generate the password
     let password = '';
     for (let i = 0; i < length; i++) {
-        // 确保均匀分布：使用浮点数映射避免取模偏差
+        // uniform distribution: float mapping avoids modulo bias
         const rand = randomValues[i] / (0xFFFFFFFF + 1);
         const index = Math.floor(rand * charset.length);
         password += charset[index];
@@ -332,7 +332,13 @@ function performEncrypt() {
             rulePhrase: factor.value,
             path,
         });
-        window.reactAppRef.current.shuffleCellColors();
+        // Decoy refresh of the grid board: never allowed to affect the crypto flow
+        // (the component may not be mounted yet in exotic load orders).
+        try {
+            window.reactAppRef.current?.shuffleCellColors?.();
+        } catch (err) {
+            console.warn('shuffleCellColors skipped:', err && err.message ? err.message : err);
+        }
     } catch (err) {
         displayError(`Chessboard error for encryption: ${err.message}`);
     }
@@ -367,7 +373,12 @@ function performDecrypt() {
             rulePhrase: factor.value,
             path,
         });
-        window.reactAppRef.current.shuffleCellColors();
+        // Decoy refresh of the grid board; never allowed to break the crypto flow.
+        try {
+            window.reactAppRef.current?.shuffleCellColors?.();
+        } catch (err) {
+            console.warn('shuffleCellColors skipped:', err && err.message ? err.message : err);
+        }
     } catch (err) {
         displayError(`Chessboard error for decryption: ${err.message}`);
     }
@@ -555,14 +566,15 @@ function switchToTab(tabId) {
     tabContents.forEach(content => {
         if (content.id === tabId) {
             content.classList.add('active');
-            if (content.id == 'password-manager' & !content.hasAttribute('size')) {
+            // One-time min-width fixup for the manager tab (bitwise & was a typo;
+            // use a data attribute instead of abusing a boolean attribute).
+            if (content.id == 'password-manager' && !content.dataset.sized) {
                 let baseWidth = content.getBoundingClientRect().width + 60;
                 if (baseWidth > content.parentNode.getBoundingClientRect().width) {
                     baseWidth -= 20;
                 }
-                console.log(baseWidth);
                 content.style.minWidth = `${baseWidth <= 700 ? baseWidth : 700}px`;
-                content.setAttribute('size', true);
+                content.dataset.sized = '1';
             }
         } else {
             content.classList.remove('active');

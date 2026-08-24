@@ -1,12 +1,16 @@
-// WebEncryptor 单文件服务器 (Go 版)
+// WebEncryptor single-file server (Go)
 //
-// 一个完全自包含的 HTTPS 服务器，编译为单个可执行文件，无任何运行时依赖：
-//   - 静态网页：htdocs/ 已嵌入二进制（构建时打包），也可用 --dir 指向任意静态目录
-//   - REST API：/api/passwords 密码管理（X-Auth-Token 鉴权）
-//   - 首次运行自动生成自签证书（cert/），passwords.json 与可执行文件同目录
-//   - 默认端口 8443（>1024，无需 root），自动打开浏览器
+// A fully self-contained HTTPS server compiled to a single executable with no
+// runtime dependencies:
+//   - Static web app: htdocs/ is embedded into the binary at build time
+//     (--dir serves any external static directory instead)
+//   - REST API: /api/passwords password management (X-Auth-Token auth)
+//   - Self-signed certificate generated automatically on first run (cert/);
+//     passwords.json lives next to the executable
+//   - Default port 8443 (>1024, no root required), auto-opens the browser
 //
-// 交叉编译见 build.sh。纯 Go 标准库实现，可运行于 Windows / macOS / Linux / ARM。
+// Cross-compilation: see build.sh. Pure Go standard library; runs on
+// Windows / macOS / Linux / ARM.
 
 package main
 
@@ -14,6 +18,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -45,7 +50,7 @@ import (
 //go:embed all:htdocs
 var embeddedFS embed.FS
 
-// PasswordEntry 为 passwords.json 中保存的密码条目。
+// PasswordEntry is one password record persisted in passwords.json.
 type PasswordEntry struct {
 	ID          int    `json:"id"`
 	Name        string `json:"name"`
@@ -63,20 +68,20 @@ type server struct {
 
 var httpSrv *http.Server
 
-// --- 数据库持久化 ---
+// --- database persistence ---
 
 func (s *server) loadDB() error {
-	s.nextID = 1 // id 从 1 开始
+	s.nextID = 1 // ids start at 1
 	data, err := os.ReadFile(s.dbPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("数据库文件 '%s' 不存在，将使用空数据库启动。", s.dbPath)
+			log.Printf("Database file '%s' does not exist; starting with an empty database.", s.dbPath)
 			return nil
 		}
 		return err
 	}
 	if err := json.Unmarshal(data, &s.db); err != nil {
-		log.Printf("错误: 无法解析 '%s'，将使用空数据库启动。", s.dbPath)
+		log.Printf("Error: cannot parse '%s'; starting with an empty database.", s.dbPath)
 		s.db = nil
 		return nil
 	}
@@ -85,11 +90,12 @@ func (s *server) loadDB() error {
 			s.nextID = p.ID + 1
 		}
 	}
-	log.Printf("成功从 '%s' 加载 %d 条密码数据。", s.dbPath, len(s.db))
+	log.Printf("Loaded %d password records from '%s'.", len(s.db), s.dbPath)
 	return nil
 }
 
-// saveDB 原子写盘：先写临时文件再 rename，避免写一半损坏数据库。
+// saveDB writes atomically: temp file first, then rename, so a crash never
+// leaves a half-written database behind.
 func (s *server) saveDB() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -104,11 +110,11 @@ func (s *server) saveDB() error {
 	if err := os.Rename(tmp, s.dbPath); err != nil {
 		return err
 	}
-	log.Printf("数据库已保存到 '%s'（%d 条）。", s.dbPath, len(s.db))
+	log.Printf("Database saved to '%s' (%d records).", s.dbPath, len(s.db))
 	return nil
 }
 
-// --- HTTP 工具 ---
+// --- HTTP helpers ---
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -120,7 +126,7 @@ func methodNotAllowed(w http.ResponseWriter) {
 	writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method Not Allowed"})
 }
 
-// statusRecorder 用于访问日志中记录状态码。
+// statusRecorder captures the status code for access logs.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -134,15 +140,69 @@ func (r *statusRecorder) WriteHeader(code int) {
 func withLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: 200}
+		// Static is embedded & immutable per binary (content never changes), but
+		// the same URLs serve fresh builds, so use revalidation caching: paired
+		// with strong ETags this lets repeat visits 304 the ~1.4 MB asset set.
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		start := time.Now()
 		next.ServeHTTP(rec, r)
 		log.Printf("%s %s -> %d (%s)", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond))
 	})
 }
 
-// --- API 路由 ---
+// staticCache serves static files with strong ETags (sha256 of the content,
+// cached per path) and honors If-None-Match -> 304. The embedded FS has zero
+// ModTime, so without this every visit fully re-downloads the web app.
+type staticCache struct {
+	fs    fs.FS
+	mu    sync.Mutex
+	etags map[string]string
+}
+
+func newStaticCache(fsys fs.FS) *staticCache {
+	return &staticCache{fs: fsys, etags: make(map[string]string)}
+}
+
+func (c *staticCache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		if etag, ok := c.etag(r.URL.Path); ok {
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("ETag", etag)
+			if inm := r.Header.Get("If-None-Match"); inm != "" && inm == etag {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+	}
+	http.FileServer(http.FS(c.fs)).ServeHTTP(w, r)
+}
+
+func (c *staticCache) etag(p string) (string, bool) {
+	path := strings.TrimPrefix(p, "/")
+	c.mu.Lock()
+	e, ok := c.etags[path]
+	c.mu.Unlock()
+	if ok {
+		return e, true
+	}
+	data, err := fs.ReadFile(c.fs, path)
+	if err != nil {
+		return "", false // directories (index.html resolution) fall through to FileServer
+	}
+	sum := sha256.Sum256(data)
+	// 16 hex chars of the digest keep the header short; collision risk is nil here.
+	e = `"` + fmt.Sprintf("%x", sum[:8]) + `"`
+	c.mu.Lock()
+	c.etags[path] = e
+	c.mu.Unlock()
+	return e, true
+}
+
+// --- API routes ---
 
 func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
+	// API responses carry password data: never let them be cached.
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, X-Auth-Token")
@@ -193,7 +253,7 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 			s.nextID++
 			s.mu.Unlock()
 			if err := s.saveDB(); err != nil {
-				log.Printf("保存数据库失败: %v", err)
+				log.Printf("Failed to save database: %v", err)
 			}
 			writeJSON(w, http.StatusCreated, entry)
 		default:
@@ -238,7 +298,7 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 			updated := *target
 			s.mu.Unlock()
 			if err := s.saveDB(); err != nil {
-				log.Printf("保存数据库失败: %v", err)
+				log.Printf("Failed to save database: %v", err)
 			}
 			writeJSON(w, http.StatusOK, updated)
 		case http.MethodDelete:
@@ -258,7 +318,7 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if err := s.saveDB(); err != nil {
-				log.Printf("保存数据库失败: %v", err)
+				log.Printf("Failed to save database: %v", err)
 			}
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -266,7 +326,7 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case path == "/api/shutdown" && r.Method == http.MethodPost:
-		log.Println("收到关闭请求 (POST /api/shutdown)...")
+		log.Println("Shutdown requested (POST /api/shutdown)...")
 		writeJSON(w, http.StatusOK, map[string]string{"message": "Server is shutting down..."})
 		go shutdownServer()
 
@@ -275,7 +335,7 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// --- 自签证书 ---
+// --- self-signed certificate ---
 
 func generateCert(dir, cn, org string, sans []string, days int) error {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -325,7 +385,7 @@ func generateCert(dir, cn, org string, sans []string, days int) error {
 	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0o600); err != nil {
 		return err
 	}
-	log.Printf("已生成自签证书 (有效期 %d 天, SAN: %s): %s, %s", days, strings.Join(sans, ", "), certFile, keyFile)
+	log.Printf("Self-signed certificate generated (%d days, SAN: %s): %s, %s", days, strings.Join(sans, ", "), certFile, keyFile)
 	return nil
 }
 
@@ -337,14 +397,14 @@ func ensureCert(dir, cn, org string, sans []string, days int) (string, string, e
 			return certFile, keyFile, nil
 		}
 	}
-	log.Println("证书不存在，正在生成自签证书...")
+	log.Println("Certificate not found; generating a self-signed certificate...")
 	if err := generateCert(dir, cn, org, sans, days); err != nil {
 		return "", "", err
 	}
 	return certFile, keyFile, nil
 }
 
-// --- 打开浏览器 ---
+// --- open the browser ---
 
 func openBrowser(url string) {
 	var cmd *exec.Cmd
@@ -357,7 +417,7 @@ func openBrowser(url string) {
 		cmd = exec.Command("xdg-open", url)
 	}
 	if err := cmd.Start(); err != nil {
-		log.Printf("无法自动打开浏览器: %v", err)
+		log.Printf("Could not open the browser automatically: %v", err)
 	}
 }
 
@@ -369,33 +429,35 @@ func shutdownServer() {
 	}
 }
 
-// --- 主入口 ---
+// --- main entry ---
 
 func main() {
 	log.SetFlags(log.LstdFlags)
 
 	var (
-		port      = flag.Int("port", 8443, "监听端口 (默认 8443, >1024 无需 root)")
-		token     = flag.String("token", "", "API 访问令牌: 设置后所有 /api/ 请求必须携带请求头 X-Auth-Token; 不设置则局域网内任何能访问本端口的人都可以读写密码库")
-		httpOnly  = flag.Bool("http", false, "使用纯 HTTP (不启用 TLS, 适合内网或反代场景)")
-		dir       = flag.String("dir", "", "静态文件目录; 默认使用内嵌的 htdocs (构建时打包)")
-		noBrowser = flag.Bool("no-browser", false, "不自动打开浏览器")
-		debug     = flag.Bool("debug", false, "同时将日志写入 server.log")
-		cn        = flag.String("cn", "localhost", "证书通用名称 (Common Name)")
-		org       = flag.String("org", "WebEncryptor", "证书组织名称")
-		san       = flag.String("san", "localhost,127.0.0.1", "证书 SAN (逗号分隔的域名或 IP)")
-		days      = flag.Int("days", 365, "证书有效天数")
+		port      = flag.Int("port", 8443, "Listen port (default 8443, >1024 needs no root)")
+		token     = flag.String("token", "", "API access token: when set, every /api/ request must carry the header X-Auth-Token; without it anyone who can reach this port can read/write the password database")
+		httpOnly  = flag.Bool("http", false, "Serve plain HTTP (no TLS; for LAN or reverse-proxy setups)")
+		dir       = flag.String("dir", "", "External static directory; defaults to the embedded htdocs (compiled in)")
+		noBrowser = flag.Bool("no-browser", false, "Do not open the browser automatically")
+		debug     = flag.Bool("debug", false, "Also write logs to server.log")
+		cn        = flag.String("cn", "localhost", "Certificate Common Name")
+		org       = flag.String("org", "WebEncryptor", "Certificate organization")
+		san       = flag.String("san", "localhost,127.0.0.1", "Certificate SANs (comma-separated domains or IPs)")
+		days      = flag.Int("days", 365, "Certificate validity in days")
 	)
 	flag.Parse()
 
-	// 数据文件、证书、日志都在可执行文件所在目录 → 整个文件夹即插即用、可整体拷贝。
+	// Data files, certificates and logs live next to the executable -> the
+	// whole folder is portable and can be copied as-is.
 	exe, err := os.Executable()
 	if err != nil {
 		exe = os.Args[0]
 	}
 	baseDir := filepath.Dir(exe)
 	if cwd, err := os.Getwd(); err == nil {
-		// 开发时 (go run) 可执行文件在临时目录，回退到当前工作目录。
+		// During development (go run) the executable lives in a temp dir;
+		// fall back to the working directory.
 		if strings.Contains(baseDir, os.TempDir()) || baseDir == "." {
 			baseDir = cwd
 		}
@@ -405,7 +467,7 @@ func main() {
 		logFile, err := os.OpenFile(filepath.Join(baseDir, "server.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if err == nil {
 			log.SetOutput(io.MultiWriter(os.Stderr, logFile))
-			log.Printf("日志已同时写入 %s", filepath.Join(baseDir, "server.log"))
+			log.Printf("Logs are also written to %s", filepath.Join(baseDir, "server.log"))
 		}
 	}
 
@@ -413,21 +475,21 @@ func main() {
 
 	s := &server{token: *token, dbPath: dbPath}
 	if err := s.loadDB(); err != nil {
-		log.Fatalf("读取数据库失败: %v", err)
+		log.Fatalf("Failed to read the database: %v", err)
 	}
 
-	// 静态文件: --dir 优先，否则用内嵌的 htdocs。
+	// Static files: --dir wins, otherwise the embedded htdocs.
 	var staticFS fs.FS
 	if *dir != "" {
-		log.Printf("使用外部静态目录: %s", *dir)
+		log.Printf("Using external static directory: %s", *dir)
 		staticFS = os.DirFS(*dir)
 	} else {
 		staticFS, err = fs.Sub(embeddedFS, "htdocs")
 		if err != nil {
-			log.Fatalf("内嵌静态文件加载失败: %v", err)
+			log.Fatalf("Failed to load embedded static files: %v", err)
 		}
 	}
-	// 补全 MIME 类型 (某些平台系统表缺失)。
+	// Fill in MIME types (some platforms have incomplete system tables).
 	for ext, typ := range map[string]string{
 		".js":          "text/javascript; charset=utf-8",
 		".mjs":         "text/javascript; charset=utf-8",
@@ -441,17 +503,17 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/", s.apiHandler)
-	mux.Handle("/", http.FileServer(http.FS(staticFS)))
+	mux.Handle("/", newStaticCache(staticFS))
 	handler := withLog(mux)
 
 	addr := fmt.Sprintf("0.0.0.0:%d", *port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		if isPermissionError(err) {
-			log.Printf("致命错误: 无法绑定端口 %d (权限不足或被占用)。", *port)
-			log.Printf("提示: 端口 < 1024 需要 root/管理员权限，请改用 --port 8443 或更高端口。")
+			log.Printf("Fatal error: cannot bind port %d (permission denied or already in use).", *port)
+			log.Printf("Tip: ports < 1024 need root/admin; use --port 8443 or higher instead.")
 		} else {
-			log.Printf("致命错误: 无法监听 %s: %v", addr, err)
+			log.Printf("Fatal error: cannot listen on %s: %v", addr, err)
 		}
 		os.Exit(1)
 	}
@@ -462,11 +524,11 @@ func main() {
 		certDir := filepath.Join(baseDir, "cert")
 		certFile, keyFile, err := ensureCert(certDir, *cn, *org, splitCSV(*san), *days)
 		if err != nil {
-			log.Fatalf("证书生成/加载失败: %v", err)
+			log.Fatalf("Certificate generation/loading failed: %v", err)
 		}
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
-			log.Fatalf("证书加载失败: %v", err)
+			log.Fatalf("Certificate loading failed: %v", err)
 		}
 		ln = tls.NewListener(ln, &tls.Config{
 			Certificates: []tls.Certificate{cert},
@@ -478,19 +540,19 @@ func main() {
 	url := fmt.Sprintf("%s://127.0.0.1:%d/index.html", scheme, *port)
 	log.Printf("%s server starting on %s", strings.ToUpper(scheme), url)
 	if *token != "" {
-		log.Printf("🔑 API 访问令牌: %s", *token)
-		log.Printf("   浏览器首次访问 Manager 时会提示输入该令牌 (保存在 localStorage)。")
+		log.Printf("API access token: %s", *token)
+		log.Printf("   The browser asks for this token on first visit to the Manager (stored in localStorage).")
 	} else {
-		log.Printf("⚠️ 警告: 未设置 API 访问令牌 (--token)。")
-		log.Printf("   局域网内任何能访问本端口的人都可以读写密码库, 建议: webencryptor --token <随机字符串>")
+		log.Printf("WARNING: no API access token set (--token).")
+		log.Printf("   Anyone who can reach this port can read/write the password database; run: webencryptor --token <random-string>")
 	}
 
-	// Ctrl+C / SIGTERM 优雅关闭。
+	// Graceful shutdown on Ctrl+C / SIGTERM.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sig
-		log.Println("收到退出信号, 正在关闭...")
+		log.Println("Exit signal received; shutting down...")
 		shutdownServer()
 	}()
 
@@ -499,7 +561,7 @@ func main() {
 	}
 
 	if err := httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
-		log.Printf("服务器错误: %v", err)
+		log.Printf("Server error: %v", err)
 		os.Exit(1)
 	}
 	log.Println("Server has been shut down.")

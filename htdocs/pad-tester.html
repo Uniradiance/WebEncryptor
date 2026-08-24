@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>图案稳定性测试 — WebEncryptor</title>
+    <title>Pattern Stability Tester - WebEncryptor</title>
     <style>
         body { font-family: system-ui, sans-serif; max-width: 780px; margin: 2rem auto; padding: 0 1rem; color: #1f2937; }
         h1 { font-size: 1.25rem; }
@@ -18,14 +18,14 @@
     </style>
 </head>
 <body>
-    <h1>手绘图案稳定性测试</h1>
-    <p>目的：验证"每次画得差不多"能否稳定识别为同一个方向序列。<br>
-       方法：在下方长条形画板上画你的图案（<b>横/竖/斜直线段均可、至少 10 段、每段画长一些</b>），点"记录本次"（画板自动清空），连画 10 次以上，看一致率。</p>
-    <div class="tip">💡 测试前先画 1~2 次热身，确认反馈栏显示"有效"且段数符合你的预期；正式记录时每次按同样的记忆画。</div>
+    <h1>Hand-drawn Pattern Stability Test</h1>
+    <p>Purpose: verify that "drawing roughly the same every time" reliably produces the same direction sequence.<br>
+        Method: draw your pattern on the pad below (<b>horizontal / vertical / diagonal segments are all fine, at least 10 segments, each reasonably long</b>), click "Record this draw" (the pad clears automatically), repeat 10+ times and check the consistency rate.</p>
+    <div class="tip">&#128161; Warm up with 1-2 draws first until the feedback line shows "Valid" with the number of segments you expect; then record each draw from memory exactly the same way.</div>
     <div id="pad"></div>
     <div class="controls">
-        <button id="recordBtn" class="primary">记录本次</button>
-        <button id="clearAllBtn">清空记录</button>
+        <button id="recordBtn" class="primary">Record this draw</button>
+        <button id="clearAllBtn">Clear all records</button>
         <span id="summary"></span>
     </div>
     <pre id="log"></pre>
@@ -46,11 +46,11 @@
             }
             const ok = records.filter(r => r.ok).length;
             const pct = (100 * ok / records.length).toFixed(0);
-            summaryEl.textContent = `已记录 ${records.length} 次, 与首次一致 ${ok} 次 (${pct}%)`;
+            summaryEl.textContent = `${records.length} draws recorded, ${ok} matches the first draw (${pct}%)`;
             const first = records[0].seq || records[0].reason;
             logEl.textContent =
-                `基准(第1次): ${first}\n` +
-                records.map((r, i) => `${String(i + 1).padStart(2)}. ${r.ok ? '✅' : '❌'} ${r.seq || r.reason}`).join('\n');
+                `Baseline (draw 1): ${first}\n` +
+                records.map((r, i) => `${String(i + 1).padStart(2)}. ${r.ok ? 'OK ' : 'MISS'} ${r.seq || r.reason}`).join('\n');
         }
 
         document.getElementById('recordBtn').addEventListener('click', () => {

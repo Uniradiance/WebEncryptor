@@ -1,82 +1,105 @@
-# 这是一个基于web的文本加密软件，有密码管理功能。
+# WebEncryptor — Web-Based Text Encryption with Password Management
 
-采用**三因子密钥派生 + 单层 AEAD** 方案：主口令、棋盘路径、手绘图案链码三个因子拼入 KDF 盐，经 **Argon2id**（内存困难型 KDF，3 轮 / 256 MiB）派生主密钥，再经 HKDF-SHA256 分离出加密密钥，最后用 **ChaCha20-Poly1305**（单层）加密。安全性取决于三因子组合熵 + Argon2id 的成本，密文可以公开存放。
+**三因子密钥派生 + 单层 AEAD**：主口令、棋盘路径、手绘图案链码三个因子拼入 KDF 盐，经 **Argon2id**（内存困难型 KDF，3 轮 / 256 MiB）派生主密钥，再经 HKDF-SHA256 分离出加密密钥，最后用 **ChaCha20-Poly1305**（单层）加密。安全性取决于三因子组合熵 + Argon2id 的成本，密文可以公开存放。
 
 ## 部署方式（推荐）：Go 单文件服务器
 
-`server.go` 是**推荐的后端**：单个可执行文件、零运行时依赖、跨平台（Windows / macOS / Linux / ARM），静态网页已嵌入二进制，`htdocs/` 文件夹都不需要分发。
-
-**为什么选它：**
-- **免 root**：默认监听 8443 端口（>1024 无需管理员权限），不再绑定 443
-- **便携**：整个程序就一个文件；`cert/`、`passwords.json`、`server.log` 都生成在可执行文件旁边，整个文件夹拷走即用
-- **多平台**：一条 `./build.sh` 交叉编译出 8 种平台的产物到 `dist/`
-- **可托管任意静态网页**：`--dir <文件夹>` 可以把任何静态站点目录挂上去（开发时也可用它指向 htdocs 免重新编译）
-- **可纯明文**：`--http` 关闭 TLS，适合内网或放在 nginx/Caddy 后面
+`server.go` 是**推荐的后端**：单个可执行文件、零运行时依赖、跨平台（Windows / macOS / Linux / ARM），静态网页已嵌入二进制，`htdocs/` 文件夹不需要分发。`./build.sh` 交叉编译出全部平台产物到 `dist/`（需要 `CGO_ENABLED=0`，构建脚本已设置）。
 
 **快速开始：**
 ```bash
 ./build.sh                          # 生成 dist/ 下所有平台二进制
 ./dist/webencryptor-linux-amd64 --token 9f8a7b6c5d4e3f2a1b0c   # 启动
 ```
-Windows 双击 `webencryptor-windows-amd64.exe`（带控制台）或 `webencryptor-windows-amd64-silent.exe`（静默版，无窗口）即可，浏览器会自动打开。
 
-**参数：**
-
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `--port` | `8443` | 监听端口（>1024 无需 root） |
-| `--token` | 无 | API 访问令牌，不设置则局域网内任何人都能读写密码库（强烈建议设置） |
-| `--http` | 关 | 纯 HTTP，不启用 TLS |
-| `--dir` | 内嵌 htdocs | 改为从外部目录提供静态文件 |
-| `--san` | `localhost,127.0.0.1` | 证书 SAN（逗号分隔的域名/IP） |
-| `--days` | `365` | 证书有效天数 |
-| `--cn` / `--org` | `localhost` / `WebEncryptor` | 证书主题 |
-| `--no-browser` | 关 | 不自动打开浏览器 |
-| `--debug` | 关 | 日志同时写入 `server.log` |
+**参数**（详见 `server.go`）：`--port`（默认 8443）、`--token`（API 令牌，强烈建议设置）、`--http`（纯 HTTP）、`--dir`（外部静态目录）、`--san/--days/--cn/--org`（证书）、`--no-browser`、`--debug`（写 server.log）。
 
 ## 加密规则
-1. **基础密码（Password for Encryption）**：因子 A，你记住的主口令。
-2. **手绘图案（Pattern）**：因子 C，长条形画板上手绘的折线图案（台阶、折线、斜线都行），识别为**八方向链码序列**（横/竖/斜 8 个方向，如 `RURDRLUDRU`）作为因子。**支持多次落笔累积绘制**（画完一笔继续画下一笔，识别自动追加；画错了用"撤回"撤销最后一笔），要求**总共至少 10 段、每段画长一些（≥1/20 画板宽度）**。画板实时显示识别结果（有效 / 段数不足），当场就能确认，不用等解密失败。图案对平移和缩放不敏感，重复绘制只需"拐弯数、方向、顺序"一致。八方向编码对旧的四方向（纯横竖）图案完全兼容。
-3. **棋盘（Interactive Color Grid (Path)）**：因子 B，类安卓图案解锁的彩色棋盘，点击顺序 + 颜色构成路径字符串，加密与解密时必须完全一致。
+1. **基础密码（Password）**：因子 A，主口令。
+2. **棋盘（Interactive Color Grid (Path)）**：因子 B，彩色棋盘上"点击顺序 + 颜色"构成路径字符串，必须完全一致。
+3. **手绘图案（Signature Pattern）**：因子 C，长条形画板上手绘的折线图案，识别为**八方向链码序列**（如 `RURDLDRU`）。支持多笔累积绘制、"撤回"撤销最后一笔；要求总共**至少 10 段、每段画长一些（≥1/20 画板宽度）**。图案对平移和缩放不敏感，只需"拐弯数、方向、顺序"一致。
 
-三个因子全部拼入 KDF 盐材料（长度前缀编码消除拼接歧义），**缺一不可、互为兜底**：泄露其中任意一个，其余两个仍然必须被猜中；攻击者每验证一次完整猜测都要付一次 Argon2id（256 MiB 内存 + 3 轮）的成本。
+## 图案识别算法
+
+管线（`htdocs/signature_recognition.js` 参考实现 + Rust/WASM 加速内核，二者输出严格一致）：
+
+1. **自适应 DP 去噪**：抖动用二阶差分第 25 分位数估计（σ̂），容差随 σ̂ 放大（上限 1.6× 基础值）；回折环/抖动被折叠成直弦，真拐角保留。
+2. **等弧长重采样**（2px 步长）：统一点距，消除手速差异。
+3. **转角剖面**：固定弧长双弦的局部转向角 + 5 点滑窗；剖面局部极大值即拐角（几何确定，不随噪声跳动），低于 24° 的候选视为大圆弧/抖动；间距 20px 内的候选合并。
+4. **分段**：段方向取段内点集的最小二乘主方向（对拐角定位误差稳健）；段长取路径弧长。
+5. **迭代修剪**（每轮删除一条噪声段，删除后重新合并）：
+   - **桥段**：两侧同向的短 V 形（抖动凸起）；
+   - **夹角段**：方向介于两侧之间 + 短于上下限 + 一侧拐角 ≥40°（圆角弧尾）；
+   - **尖刺段**（本优化新增）：两侧转角 ≤135° 时，方向落在邻段短扇区**之外**的短段（DP 在拐角处产生的回冲伪段，如 U→D→R 中的 D）；
+   - **共线顶点**：两侧弦的最小二乘拟合夹角 <14°，缝合；
+   - **短段**：弧长 <18px 或弦长 <2px。
+
+### 算法优化要点（2026-08 优化轮）
+- 核心识别管线用 **Rust 重写并编译为 WASM**（`rust/recognition` → `htdocs/recognition_wasm.wasm`，`./build-wasm.sh` 构建）：绘制过程中每帧只重算当前笔画，WASM 内核处理原始点缓冲（零逐帧对象分配），识别延迟从 ~2ms 降到亚毫秒级；JS 参考实现保留为**精确一致的降级后备**（WASM 加载失败时链码不变）。
+- 新增**尖刺修剪规则**：消除 DP 在拐角处产生的回冲伪段，现实抖动（σ≤1.5px）300 次随机变化测试从 299/300 提升到 **300/300**。
+- `SignaturePad` 采用**离屏画布缓存已落笔笔画**：逐帧重绘成本从 O(全部笔画点数) 降到 O(当前笔画点数)。
+- 前端完全自托管（React 19 已 vendor 到 `htdocs/vendor/`，无 CDN 依赖，真正离线可用）。
+
+### 测试
+```bash
+node test/recognition_test.mjs     # 稳健性回归 + JS/WASM 精确一致性(parity) + 性能
+cargo test --manifest-path rust/recognition/Cargo.toml   # Rust 侧单元测试
+```
+浏览器手动稳定性测试：打开 `htdocs/pad-tester.html`，连画 10 次看一致率（先热身 1~2 次）。
 
 ## 密文格式
-输出为 `WE1.<盐(16B,base64)>.<IV(12B,base64)>.<密文(base64)>.<MAC(16B,base64)>`，随机盐随密文存储。
-
-> ⚠️ **兼容性警告**：`WE1.` 格式与旧版"多层 AES/ChaCha 套娃"密文**不兼容**。旧密文需要用旧版程序先解密，再用本版重新加密。旧版的多层方案已被移除——它不增加安全性，只会让合法用户比攻击者多付 (层数+1) 倍的 KDF 成本。
+`WE1.<盐(16B,base64)>.<IV(12B,base64)>.<密文(base64)>.<MAC(16B,base64)>`，随机盐随密文存储。
+> ⚠️ `WE1.` 格式与旧版"多层 AES/ChaCha 套娃"密文**不兼容**；旧密文需用旧版程序解密后重新加密。旧多层方案已移除：它不增加安全性，只会让合法用户比攻击者多付 (层数+1) 倍 KDF 成本。
 
 ## 生成密码
-在加密也有生成密码选项，可生成8、14、18位随机密码。
+加密界面内置随机密码生成（8 / 14 / 18 位）。
 
-## 图案识别与稳定性测试
-- 识别算法：平滑 → Douglas-Peucker 折线简化 → **拐角精化**（每个顶点在局部窗口内吸附到"转角最尖锐处"；若窗口内最尖锐点的局部转向角仍低于 25°，则视为**大圆弧而非转折**，删除顶点、两弦合并为单一走势段——"挺直的大圆弧"不会再被劈成两个方向）→ 八方向分类（主轴 ±26.6°）→ 迭代式"合并同向段 ↔ 删除短段"。转折判定门槛**逐段增长**（每确认一段，后续段的判定长度 ×1.5，上限 2 倍基础值）：手抖/弧线产生的短腿 V 形被合并掉，长线条尾部的局部倾斜不会翻出新段；斜段另设 1.4 倍门槛剔除拐角圆弧弦（见 `htdocs/signature_recognition.js`）。⚠️ 腿角距扇区边界 ±5° 以内是固有量化边界，任何识别器都会随抖动翻转，画图案应避开边界角；
-- 稳定性测试（浏览器手动）：打开 `htdocs/pad-tester.html`，连画 10 次看一致率（测试前先热身 1~2 次）；
-- 自动化回归：`node test/recognition_test.js`（合成数据模拟抖动/缩放/平移/圆角/多笔画，现实抖动 300 次须 100% 一致）。
-
-# 声明
-这个项目基本上是AI写的，我负责复制粘贴。
+---
 
 # Web-Based Text Encryption Software with Password Management
 
-This software uses a **three-factor key derivation + single-layer AEAD** scheme: the master password, the color-grid path, and a hand-drawn pattern chain code are all folded into the KDF salt material; **Argon2id** (3 passes / 256 MiB) derives a master key; HKDF-SHA256 separates the encryption key; **ChaCha20-Poly1305** (single layer) does the encryption. Ciphertexts are safe to store publicly.
+**Three-factor key derivation + single-layer AEAD**: the master password, the color-grid path and the hand-drawn pattern chain code are folded into the KDF salt material; **Argon2id** (3 passes / 256 MiB) derives a master key; HKDF-SHA256 separates the encryption key; a **single ChaCha20-Poly1305** layer encrypts. Ciphertexts are safe to store publicly.
+
+## Deployment (recommended): single-file Go server
+
+`server.go` is the recommended backend: one executable, zero runtime dependencies, cross-platform (Windows / macOS / Linux / ARM); the static web app is embedded. `./build.sh` cross-compiles every platform into `dist/` (uses `CGO_ENABLED=0`, already set in the script).
 
 ## Encryption Rules
-1. **Base Password**: Factor A, the master password you remember.
-2. **Hand-Drawn Pattern**: Factor C, drawn on the long strip pad. Axis-aligned patterns (stairs, zigzags) are recognized as a 4-direction chain code (e.g. `RURDLDRU`) used as the factor. **Multiple pen strokes accumulate** (keep drawing; "undo" removes the last stroke). Requires at least 10 segments in total, each drawn reasonably long (≥1/20 of the pad width). The pad shows live recognition feedback (valid / too few segments / diagonal detected) so mistakes are caught immediately. Translation- and scale-invariant: only the turn sequence must match.
-   - **Drawing**: hand-draw an axis-aligned pattern (stairs, zigzags) on the long strip pad; it is recognized as a 4-direction chain code (e.g. `RURDLDRU`) used as the factor. Requires at least 10 segments, each drawn reasonably long (≥1/20 of the pad width); the pad shows live recognition feedback (valid / too few segments / diagonal detected) so mistakes are caught immediately. Translation- and scale-invariant: only the turn sequence must match.
-3. **Interactive Color Grid (Path)**: Factor B, an Android-pattern-like colored grid; click order + colors form the path string and must match exactly for decryption.
+1. **Password**: factor A, the master password.
+2. **Interactive Color Grid (Path)**: factor B, click order + colors — must match exactly.
+3. **Signature Pattern**: factor C, drawn on the elongated pad and recognized as an **8-direction chain code** (e.g. `RURDLDRU`). Multiple strokes accumulate; "Undo" removes the last stroke. Requires **at least 10 segments**, each reasonably long (≥1/20 of the pad width). Translation- and scale-invariant: only the turn sequence must match.
 
-All three factors are folded into the KDF salt material (length-prefixed to avoid ambiguity). All are required; leaking any single one still leaves the other two. Every full guess by an attacker costs one Argon2id evaluation (256 MiB / 3 passes).
+## Pattern Recognition
+
+Pipeline (pure-JS reference in `htdocs/signature_recognition.js` + a Rust/WASM core with **strictly identical output**):
+
+1. **Adaptive DP de-noising** (tolerance scaled by the 25th-percentile jitter estimate, capped at 1.6× base).
+2. **Uniform arc-length resampling** (2 px) — hand-speed invariant.
+3. **Turn-angle profile** over fixed-arc chords + 5-point smoothing; local maxima are corners (geometrically stable), <24° candidates treated as arcs/jitter; candidates within 20 px merge.
+4. **Segmentation**: direction = least-squares principal direction of the segment's points; length = path arc.
+5. **Iterative pruning** (one deletion per round, then re-merge): bridge (short V between same-direction neighbors), between (rounded-corner arc tail), **spike (new: short out-of-fan reversal produced by DP at corners — e.g. the D in U→D→R)**, collinear vertex (<14° fitted turn, stitched), short leg (<18 px arc or <2 px chord).
+
+### Optimization notes (2026-08)
+- The recognition core is rewritten in **Rust and compiled to WASM** (`rust/recognition` → `htdocs/recognition_wasm.wasm`, built by `./build-wasm.sh`; needs `rustup target add wasm32-unknown-unknown` and `wasm-ld`): per-frame work is only the stroke in progress, latency drops from ~2 ms to sub-millisecond. The JS reference stays as an **exact-parity fallback** (the chain code never depends on WASM load timing).
+- New **spike pruning rule** removes DP corner artifacts (see `docs/REVIEW.md` §4 for measured stability numbers: the residual mismatch rate under realistic jitter σ≤1.5 px is ≤3 per 300 across nine deterministic seeds — the pipeline is at the information limit of this 2-px-resampled chain-code encoder).
+- **Review round (2026-08/09)**: the jitter estimate's O(n log n) full sort became a deterministic O(n) quickselect (identical k-th order statistic, so JS↔WASM parity still holds; extract 0.052→0.047 ms); the `stitch()` zero-displacement direction trap was fixed in both cores; the Go server now serves static assets with strong **ETags + 304 revalidation** (repeat visits transfer 0 bytes instead of ~1.4 MB) and `Cache-Control: no-store` on the API; the deleted test suite was rebuilt with deterministic seeds (`test/recognition_test.mjs`, `test/lib/battery.mjs`) and the crypto smoke test restored (`test/worker_smoke.js`). Full review: `docs/REVIEW.md`.
+- `SignaturePad` caches committed strokes on an **offscreen canvas**: per-frame redraw cost drops from O(all points) to O(current stroke).
+- Frontend fully self-hosted (React 19 vendored in `htdocs/vendor/`, no CDN — truly offline).
+
+### Tests
+```bash
+node test/recognition_test.mjs                     # stability battery + JS/WASM exact parity + perf (seeds: --seeds=1,2,7; parity runs: --runs=1200)
+node test/worker_smoke.js                          # crypto round-trip smoke (needs `npm i --no-save libsodium-sumo`)
+cargo test --manifest-path rust/recognition/Cargo.toml   # Rust unit tests
+```
+Manual stability: open `htdocs/pad-tester.html`, draw 10+ times and check the consistency rate (warm up 1–2 times first).
 
 ## Ciphertext Format
-`WE1.<salt(16B,base64)>.<IV(12B,base64)>.<ciphertext(base64)>.<MAC(16B,base64)>`, with a random salt stored alongside.
-
-> ⚠️ **Compatibility**: `WE1.` ciphertexts are **incompatible** with the old multi-layer AES/ChaCha format. Decrypt old data with the old version first, then re-encrypt. The old layering was removed: it added no security while costing legitimate users (layers+1)× the KDF work per operation vs. 1× for an attacker.
+`WE1.<salt(16B,base64)>.<IV(12B,base64)>.<ciphertext(base64)>.<MAC(16B,base64)>`.
+> ⚠️ `WE1.` is **incompatible** with the old multi-layer AES/ChaCha format; decrypt old data with the old version first. The old layering was removed: it added no security while costing legitimate users (layers+1)× the KDF work.
 
 ## Password Generation
-The encryption interface includes an option to generate 8, 14, or 18-character random passwords.
-
+The encryption panel includes random password generation (8 / 14 / 18 characters).
 
 # Disclaimer
-This project was primarily developed using AI assistance. My role involved curation and implementation of the generated solutions.
+This project was primarily developed using AI assistance.

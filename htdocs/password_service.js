@@ -11,8 +11,9 @@
 class PasswordService {
 
     /**
-     * 服务器 API 访问令牌 (localStorage 持久化)。
-     * 服务器以 --token 启动时需要, 否则 API 会返回 401。
+     * Server API access token (persisted in localStorage).
+     * Required when the server was started with --token; otherwise the API
+     * returns 401.
      */
     _getToken() {
         return localStorage.getItem('webencryptor_token') || '';
@@ -41,14 +42,14 @@ class PasswordService {
                 ...options,
             });
 
-            // 401: 令牌缺失或错误 → 提示输入一次 (保存在 localStorage)
+            // 401: missing or invalid token -> ask for it once (persisted in localStorage)
             if (response.status === 401 && !retried) {
-                const token = prompt('服务器要求访问令牌 (X-Auth-Token)。\n启动服务器时控制台会显示令牌; 输入后本浏览器会记住它:');
+                const token = prompt('The server requires an access token (X-Auth-Token).\nThe token is shown in the server console when it starts; this browser will remember it after you enter it:');
                 if (token && token.trim()) {
                     this._setToken(token);
                     return this._fetch(url, options, true);
                 }
-                throw new Error('未提供访问令牌, API 请求被拒绝 (401)。请在服务器控制台查看 --token 值。');
+                throw new Error('No access token provided; the API request was rejected (401). Check the server console for the --token value.');
             }
 
             if (!response.ok) {

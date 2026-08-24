@@ -675,6 +675,31 @@ h2 {
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); /* Anillo de foco azul */
 }
 
+/* 画板工具栏内的眼睛按钮 (放在 Undo 左边, 行内显示, 不用悬浮定位) */
+.sigpad-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-shrink: 0;
+}
+.sigpad-actions .toggle-rule-button {
+    position: static;
+    width: auto;
+    height: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.25rem;
+    border-radius: 0.375rem;
+}
+/* 已开启 "常显笔画方向": 浅蓝底 + 蓝色眼睛 */
+.sigpad-actions .toggle-rule-button.active {
+    background-color: #dbeafe;
+}
+.sigpad-actions .toggle-rule-button.active .eye-icon {
+    color: #2563eb;
+}
+
 /* Merged Encrypt/Decrypt page: input card with mutually exclusive panes */
 .input-card {
     display: flex;
@@ -851,7 +876,7 @@ h2 {
     border: 3px solid rgb(172 172 172 / 90%);
     border-radius: 0.45rem;
     box-shadow: inset 0 0 0 3px rgb(226 226 226 / 38%), 0 6px 18px rgb(153 153 153 / 35%);
-    transform: translate(-50%, -50%) rotate(359deg);
+    transform: translate(-50%, -50%) rotate(0deg);
 }
 .sigpad-toolbar {
     display: flex;

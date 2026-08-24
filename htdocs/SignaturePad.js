@@ -1,41 +1,57 @@
-// SignaturePad.js — 长条形手绘图案板 (因子 C)
-// 画布 → 多笔画累积 → 八方向链码识别 (signature_recognition.js) → 方向序列字符串,
-// 该字符串直接作为 rulePhrase 送入 crypto_worker (worker 无需任何改动)。
+// SignaturePad.js — elongated hand-drawn pattern pad (factor C).
 //
-// 交互:
-//   - 多次落笔累积绘制同一图案 (每笔画完自动识别, 继续画会追加)
-//   - 撤回: 撤销最后一笔
-//   - 清除: 全部重画
-//   - 确认: 抹去画板笔迹, 盖上"已签名"印章 (图案序列仍封存在识别器缓存, 照常供加密使用)
-//   - 防偷窥: 有效时反馈栏显示方向箭头, 最后一笔之后 5 秒无新笔迹, 自动遮蔽为固定的 18 个 * 号
-//   - 实时反馈: 有效 / 段数不足 / 检测到斜线, 当场可见, 不用等解密失败
-// 效率: 用增量识别器 (createIncrementalRecognizer), 已落笔的笔画只提取一次
-// 并缓存, 每帧只需重算"正在绘制的那一笔", 绘制中途的反馈成本与笔画总数无关。
-import "./signature_recognition.js";
+// Canvas -> multi-stroke accumulation -> 8-direction chain code recognition
+// (recognition_engine.js, Rust/WASM accelerated with a parity JS fallback) ->
+// direction-sequence string, fed to the crypto worker as rulePhrase.
+//
+// Interaction:
+//   - Multiple pen-down strokes accumulate onto the same pattern (each stroke
+//     is recognized as it completes; keep drawing to append).
+//   - Undo removes the last stroke; Clear redraws everything; Confirm erases
+//     the ink and stamps the pad (the recognized sequence stays cached for
+//     encryption).
+//   - Privacy: when valid, the feedback line shows direction arrows; 5 s after
+//     the last stroke it is masked to a fixed number of asterisks. The eye
+//     button (left of Undo) toggles "always show": direction arrows stay drawn
+//     on the strokes and the feedback stays unmasked.
+//   - Live feedback: valid / too few segments — visible immediately.
+//
+// Performance: an offscreen canvas holds the committed strokes (drawn once per
+// stroke), so per-frame redraws blit it instead of re-tracing every committed
+// polyline; the incremental recognizer only recomputes the stroke in progress.
 
-const REC = globalThis.SignatureRecognition;
+import {
+  createIncrementalRecognizer,
+  DIR_ARROW,
+} from "./recognition_engine.js";
 
-// 最后一笔之后无新笔迹, 等待该毫秒数后把箭头内容遮蔽成 * 号
+// 5 s without a new stroke -> mask the direction arrows
 const HIDE_DELAY_MS = 5000;
-// 遮蔽/已签名时显示的固定 * 号数量
+// Fixed number of asterisks used for masking / signed state
 const MASKED_DOTS = "*".repeat(18);
 
 export function createSignaturePad(container, options = {}) {
-  const minSegments = options.minSegments ?? 2;
-  const height = options.height ?? 195; // CSS px (130 × 1.5)
+  const minSegments = options.minSegments ?? 1;
+  const height = options.height ?? 195; // CSS px
 
   container.innerHTML = `
         <div class="sigpad">
             <div class="sigpad-stage">
                 <canvas class="sigpad-canvas"></canvas>
-                <div class="sigpad-stamp" hidden>已签名</div>
+                <div class="sigpad-stamp" hidden>SIGNED</div>
             </div>
             <div class="sigpad-toolbar">
-                <span class="sigpad-feedback">画你的图案：每段画长一些（≥1/20 画板宽度），同一笔里越往后的转折要越长，段多就多落几笔</span>
+                <span class="sigpad-feedback">Draw your pattern on the pad.</span>
                 <span class="sigpad-actions">
-                    <button type="button" class="sigpad-undo" title="撤销最后一笔">撤回</button>
-                    <button type="button" class="sigpad-clear" title="全部清除重画">清除</button>
-                    <button type="button" class="sigpad-confirm" title="确认签名：抹去笔迹并盖上‘已签名’章" disabled>确认</button>
+                    <button type="button" class="toggle-rule-button sigpad-directions-toggle" id="toggleRuleEncrypt" title="Always show stroke directions" aria-label="Always show stroke directions" aria-pressed="false">
+                        <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    </button>
+                    <button type="button" class="sigpad-undo" title="Undo the last stroke">Undo</button>
+                    <button type="button" class="sigpad-clear" title="Clear everything and redraw">Clear</button>
+                    <button type="button" class="sigpad-confirm" title="Confirm: erase the ink and stamp the pad" disabled>Confirm</button>
                 </span>
             </div>
         </div>`;
@@ -47,48 +63,116 @@ export function createSignaturePad(container, options = {}) {
   const undoBtn = container.querySelector(".sigpad-undo");
   const clearBtn = container.querySelector(".sigpad-clear");
   const confirmBtn = container.querySelector(".sigpad-confirm");
+  const dirToggleBtn = container.querySelector(".sigpad-directions-toggle");
   const ctx = canvas.getContext("2d");
 
-  let strokes = []; // 已完成的笔画: Array<Array<{x,y}>> (与 rec 同步)
-  let current = null; // 正在绘制的笔画
+  let strokes = []; // committed strokes: Array<Array<{x,y}>> (kept in sync with rec)
+  let current = null; // stroke in progress
   let drawing = false;
   let lastResult = null;
   let rafPending = false;
-  let signed = false; // 已确认: 笔迹已被抹去, 印章覆盖画板
-  let feedbackMasked = false; // 箭头内容已被 * 号遮蔽
-  let hideTimer = null; // 遮蔽倒计时句柄
+  let signed = false;
+  let feedbackMasked = false;
+  let showDirections = false; // eye toggle: keep stroke-direction arrows visible
+  let hideTimer = null;
 
-  // 增量识别: 已完成笔画缓存提取结果, 仅当前笔画每帧重算
-  const rec = REC.createIncrementalRecognizer({ minSegments });
+  // Offscreen canvas holding the committed strokes (redraw cache)
+  const offscreen = document.createElement("canvas");
+  const offCtx = offscreen.getContext("2d");
 
-  // --- 画布尺寸 (devicePixelRatio 感知) ---
+  // Incremental recognizer: committed strokes cached, only the current stroke
+  // is recomputed per frame.
+  const rec = createIncrementalRecognizer({ minSegments });
+
+  // --- canvas sizing (devicePixelRatio aware) ---
   const resize = () => {
     const width = Math.max(1, container.clientWidth);
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.floor(width * dpr);
     canvas.height = Math.floor(height * dpr);
     canvas.style.height = height + "px";
+    offscreen.width = canvas.width;
+    offscreen.height = canvas.height;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // re-render committed strokes (+ direction arrows, when toggled on) on the offscreen cache
+    renderOffscreen();
     redraw();
   };
 
-  const drawPolyline = (pts) => {
+  const drawPolyline = (c, pts) => {
     if (!pts || pts.length < 2) return;
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.strokeStyle = "#1f2937";
-    ctx.lineWidth = 3;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.stroke();
+    c.beginPath();
+    c.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) c.lineTo(pts[i].x, pts[i].y);
+    c.strokeStyle = "#1f2937";
+    c.lineWidth = 3;
+    c.lineCap = "round";
+    c.lineJoin = "round";
+    c.stroke();
   };
 
+  // Small filled arrowheads every `spacing` px along the polyline, pointing in
+  // the drawing direction (the "eye" toggle shows stroke direction on the pad).
+  const drawDirectionArrows = (c, pts) => {
+    if (!pts || pts.length < 2) return;
+    const spacing = 30; // px between arrowheads
+    const size = 6.5; // arrowhead size
+    c.fillStyle = "#2563eb";
+    let carry = spacing; // arc distance left until the next arrowhead
+    let prev = pts[0];
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i];
+      const dx = p.x - prev.x;
+      const dy = p.y - prev.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-3) continue;
+      const ux = dx / len;
+      const uy = dy / len;
+      const px = -uy;
+      const py = ux;
+      let d = 0; // arc walked along this edge
+      while (d + carry <= len) {
+        d += carry;
+        const x = prev.x + ux * d;
+        const y = prev.y + uy * d;
+        c.beginPath();
+        c.moveTo(x + ux * size, y + uy * size); // tip
+        c.lineTo(x - ux * size + px * size * 0.55, y - uy * size + py * size * 0.55);
+        c.lineTo(x - ux * size - px * size * 0.55, y - uy * size - py * size * 0.55);
+        c.closePath();
+        c.fill();
+        carry = spacing;
+      }
+      carry -= len - d;
+      prev = p;
+    }
+  };
+
+  // Rebuild the offscreen redraw cache: committed ink (+ direction arrows when
+  // the eye toggle is on). Keeps per-frame redraws a cheap blit.
+  const renderOffscreen = () => {
+    offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
+    for (const s of strokes) {
+      drawPolyline(offCtx, s);
+      if (showDirections) drawDirectionArrows(offCtx, s);
+    }
+  };
+
+  // Redraw = blit the committed-stroke cache + the stroke in progress (cheap:
+  // cost is O(current stroke), not O(all strokes)).
   const redraw = () => {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (signed) return; // 已确认: 画板不留任何笔迹 (识别缓存保留, 序列照常可用)
-    for (const s of strokes) drawPolyline(s);
-    if (current) drawPolyline(current);
+    if (!signed) {
+      ctx.drawImage(offscreen, 0, 0);
+    }
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!signed) {
+      if (current) drawPolyline(ctx, current);
+      if (showDirections && current) drawDirectionArrows(ctx, current);
+    }
   };
 
   const toCssPoint = (e) => {
@@ -99,16 +183,15 @@ export function createSignaturePad(container, options = {}) {
   const updateFeedback = () => {
     const r = lastResult;
     if (signed) {
-      // 已签名: 不显示说明文字, 直接呈现遮蔽为固定 18 个 * 号的状态
       feedback.textContent = MASKED_DOTS;
       feedback.className = "sigpad-feedback masked";
       feedbackMasked = false;
     } else if (!r) {
-      feedback.textContent = `每段画长一些（≥1/20 画板宽度），同一笔里越往后的转折要越长，段多就多落几笔`;
+      feedback.textContent =
+        "Draw your pattern on the pad.";
       feedback.className = "sigpad-feedback";
       feedbackMasked = false;
     } else if (r.valid) {
-      // 遮蔽时把箭头内容换成固定 18 个 * 号 (长度与段数无关)
       feedback.textContent = feedbackMasked ? MASKED_DOTS : r.message;
       feedback.className = feedbackMasked ? "sigpad-feedback masked" : "sigpad-feedback ok";
     } else {
@@ -117,12 +200,12 @@ export function createSignaturePad(container, options = {}) {
       feedbackMasked = false;
     }
     undoBtn.disabled = signed || (strokes.length === 0 && !drawing);
-    clearBtn.disabled = false; // 确认后仍可清除重建 (相当于撤销确认)
+    clearBtn.disabled = false; // clear works even after confirm (equivalent to undoing it)
     confirmBtn.disabled = !(r && r.valid && !signed);
   };
 
   const compute = () => {
-    lastResult = rec.result(current); // 缓存的历史笔画 + 在绘笔画 (预览)
+    lastResult = rec.result(current);
     updateFeedback();
   };
 
@@ -142,9 +225,10 @@ export function createSignaturePad(container, options = {}) {
     }
   };
 
-  // 最后一笔之后 HIDE_DELAY_MS 内无新笔迹 → 箭头自动遮蔽成 * 号
   const scheduleHide = () => {
     cancelHide();
+    // Eye toggle on: keep the direction arrows visible (no privacy masking).
+    if (showDirections || signed) return;
     hideTimer = setTimeout(() => {
       hideTimer = null;
       if (signed) return;
@@ -153,7 +237,6 @@ export function createSignaturePad(container, options = {}) {
     }, HIDE_DELAY_MS);
   };
 
-  // 任何绘制活动: 取消倒计时, 立刻恢复箭头显示
   const revealFeedback = () => {
     cancelHide();
     if (feedbackMasked) {
@@ -177,7 +260,7 @@ export function createSignaturePad(container, options = {}) {
     if (!drawing || !current) return;
     const p = toCssPoint(e);
     const last = current[current.length - 1];
-    if (last && Math.hypot(p.x - last.x, p.y - last.y) < 1) return; // 亚像素去抖
+    if (last && Math.hypot(p.x - last.x, p.y - last.y) < 1) return; // sub-pixel de-noise
     current.push(p);
     redraw();
     scheduleCompute();
@@ -186,24 +269,27 @@ export function createSignaturePad(container, options = {}) {
   const endStroke = () => {
     if (!drawing || !current) return;
     drawing = false;
-    strokes.push(current); // 累积: 不重新开始, 下一笔继续追加
-    rec.addStroke(current); // 落笔: 提取结果进入缓存
+    strokes.push(current); // accumulate: the next stroke appends to the pattern
+    rec.addStroke(current); // commit: result enters the cache
     current = null;
+    const last = strokes[strokes.length - 1];
+    drawPolyline(offCtx, last); // update the redraw cache once
+    if (showDirections) drawDirectionArrows(offCtx, last);
     compute();
-    scheduleHide(); // 最后一笔之后 5 秒无新笔迹 → 遮蔽箭头为 * 号
+    scheduleHide();
   };
   canvas.addEventListener("pointerup", endStroke);
   canvas.addEventListener("pointercancel", endStroke);
 
-  // 撤回最后一笔 (绘制中 / 已确认不生效)
   undoBtn.addEventListener("click", () => {
     if (drawing || signed) return;
     strokes.pop();
     rec.removeLast();
+    renderOffscreen();
     redraw();
     compute();
     revealFeedback();
-    scheduleHide(); // 撤回后若仍有效, 同样 5 秒后遮蔽
+    scheduleHide();
   });
 
   clearBtn.addEventListener("click", () => {
@@ -217,27 +303,48 @@ export function createSignaturePad(container, options = {}) {
     sigpadEl.classList.remove("signed");
     stamp.hidden = true;
     rec.clear();
+    renderOffscreen();
     redraw();
     updateFeedback();
   });
 
-  // 确认: 抹去笔迹 → 盖上"已签名"印章 (画板像被盖住的档案; 序列仍封存可继续用)
+  // Confirm: erase the ink, stamp the pad (the sequence stays cached for use)
   confirmBtn.addEventListener("click", () => {
     const r = lastResult;
     if (!r || !r.valid || signed) return;
     signed = true;
     cancelHide();
     feedbackMasked = false;
-    strokes = []; // 视觉笔迹全部抹去 (rec 缓存保留, getSequence 不受影响)
+    strokes = []; // visually erase (rec cache keeps the sequence for getSequence)
     current = null;
     drawing = false;
     sigpadEl.classList.add("signed");
     redraw();
-    stamp.hidden = false; // 直接显示"已签名"底板 (不做落印动画)
+    stamp.hidden = false;
     updateFeedback();
   });
 
-  // 首次尺寸 + 容器尺寸变化时重排 (容器从 display:none 变为可见时宽为 0, 需要重建)
+  // Eye toggle: always show stroke directions on the pad (no 5 s masking)
+  dirToggleBtn.addEventListener("click", () => {
+    showDirections = !showDirections;
+    dirToggleBtn.classList.toggle("active", showDirections);
+    dirToggleBtn.setAttribute("aria-pressed", String(showDirections));
+    dirToggleBtn.title = showDirections ? "Hide stroke directions" : "Always show stroke directions";
+    dirToggleBtn.setAttribute("aria-label", dirToggleBtn.title);
+    if (showDirections) {
+      cancelHide();
+      if (feedbackMasked) {
+        feedbackMasked = false;
+        updateFeedback();
+      }
+    } else {
+      scheduleHide();
+    }
+    renderOffscreen(); // committed strokes now carry (or drop) the arrows
+    redraw();
+  });
+
+  // initial sizing + re-layout on container size changes
   resize();
   if (typeof ResizeObserver !== "undefined") {
     const ro = new ResizeObserver(() => resize());
@@ -247,25 +354,27 @@ export function createSignaturePad(container, options = {}) {
   }
 
   return {
-    /** @returns {string|null} 有效时返回方向序列 (如 "RURDLDRU"), 否则 null */
+    /** @returns {string|null} the direction sequence (e.g. "RURDLDRU") when valid */
     getSequence() {
       return lastResult && lastResult.valid ? lastResult.sequence : null;
     },
-    /** @returns {string|null} 状态描述 (用于错误提示) */
+    /** @returns {string} status description (for error messages) */
     getStatus() {
-      return lastResult ? lastResult.message : "请先在画板上画出图案";
+      return lastResult ? lastResult.message : "Draw your pattern on the pad first.";
     },
-    /** 清空画板 (含印章与确认状态) */
+    /** Clear the pad (including stamp and confirm state) */
     clear() {
       clearBtn.click();
     },
-    /** 画板是否已绘制出有效图案 */
+    /** Whether a valid pattern has been recognized */
     isValid() {
       return !!(lastResult && lastResult.valid);
     },
-    /** 是否已确认签名 (笔迹已抹去并盖章) */
+    /** Whether the pattern has been confirmed (ink erased, pad stamped) */
     isSigned() {
       return signed;
     },
   };
 }
+
+export { DIR_ARROW };

@@ -5,7 +5,7 @@ import { compareCellIds } from './sortUtils.js'; // Added .js
 // Removed: import { CellData, CellColor } from './types';
 
 const SYNTHETIC_MOUSE_EVENT_THRESHOLD_MS = 100;
-// 全局变量存储 React 组件的引用
+// Global reference to the React component for imperative access from other modules
 window.reactAppRef = {
   current: null
 };
@@ -129,16 +129,20 @@ const App = () => {
     return () => window.removeEventListener('resize', handleResizeFooterFont);
   }, []);
 
+  // Immutable update that clones only the affected row (drag painting updates a
+  // single cell at a time; cloning 36 cells per pointer event is wasteful).
   const updateCellColor = useCallback((row, col, newColor, timestamp) => {
     setCells(prevCells => {
-      const newCells = prevCells.map(r => r.map(c => ({ ...c })));
-      const targetCell = newCells[row][col];
-      targetCell.color = newColor;
+      const newCells = prevCells.slice();
+      const newRow = prevCells[row].slice();
+      const updated = { ...newRow[col], color: newColor };
       if (newColor !== null && timestamp) {
-        targetCell.lastSetTimestamp = timestamp;
+        updated.lastSetTimestamp = timestamp;
       } else if (newColor === null) {
-        delete targetCell.lastSetTimestamp;
+        delete updated.lastSetTimestamp;
       }
+      newRow[col] = updated;
+      newCells[row] = newRow;
       return newCells;
     });
   }, []);
@@ -336,12 +340,12 @@ const App = () => {
     };
   }, [isDragging, interactionOriginCell, nextColorForOriginOrDrag, handlePointerMoveOverCell, updateCellColor, cells, COL_LABELS, ROW_LABELS, generateFullDataString, generateHalfDataString, shuffleCellColors]);
 
-  // 使用 useMemo 缓存计算结果，避免不必要的重复计算
+  // Memoized so re-renders skip recalculation when nothing changed
   const hasActiveCells = useMemo(() => {
     return cells.flat().some(cell =>
       cell.color !== null && cell.lastSetTimestamp
     );
-  }, [cells]); // 依赖 cells 状态
+  }, [cells]); // depends on cells state
 
   const handleUndo = useCallback(() => {
     const coloredCells = [];
@@ -353,24 +357,17 @@ const App = () => {
     coloredCells.sort((a, b) => (a.lastSetTimestamp || 0) - (b.lastSetTimestamp || 0));
 
     if (coloredCells.length > 0) {
-      const newCells = cells.map(r =>
-        r.map(c => {
-          // 创建单元格的浅拷贝
-          const cell = { ...c };
-
-          // 检查当前单元格是否是目标单元格
-          if (cell.id === coloredCells[coloredCells.length - 1].id) {
-            // 对目标单元格进行特殊处理
-            cell.color = null;
-          }
-
-          return cell;
+      const targetId = coloredCells[coloredCells.length - 1].id;
+      setCells(prevCells =>
+        prevCells.map(row => {
+          // clone only the row that contains the target cell
+          if (!row.some(c => c.id === targetId)) return row;
+          return row.map(c => (c.id === targetId ? { ...c, color: null } : c));
         })
       );
-      setCells(newCells);
     }
 
-  }, [cells]);
+  }, []);
 
   const handleReset = useCallback(() => {
     setCells(initialCells());

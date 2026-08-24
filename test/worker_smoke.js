@@ -102,7 +102,7 @@ function check(name, cond, detail = '') {
     check('篡改密文被拒绝', r.status === 'error', r.error);
     // 旧格式 / 非法格式
     r = await runAction({ action: 'decrypt', ciphertext: 'aGVsbG8.d29ybGQ.bWFj', password: PW, rulePhrase: RULE, path: PATH });
-    check('旧格式密文被明确拒绝', r.status === 'error' && /格式/.test(r.error), r.error);
+    check('旧格式密文被明确拒绝', r.status === 'error' && /格式|format/.test(r.error), r.error);
     r = await runAction({ action: 'decrypt', ciphertext: ct, password: PW, rulePhrase: '', path: PATH });
     check('空规则短语被拒绝', r.status === 'error', r.error);
     r = await runAction({ action: 'encrypt', plaintext: 'x', password: PW, rulePhrase: RULE, path: '   ' });
