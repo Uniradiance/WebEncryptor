@@ -2,11 +2,11 @@
 import { passwordService } from './password_service.js';
 
 // The use-for-decrypt button has two roles depending on the card state:
-// - normal (view) mode: decrypt the stored ciphertext directly (no page jump)
-// - edit mode: jump to the decryption tab (fill ciphertext, switch mode/tab)
+// - normal (view) mode: decrypt the stored ciphertext directly
+// - edit mode: jump to the Data Panel (fill ciphertext + switch to decrypt mode)
 function setUseForDecryptBtnState(btn, isEditing) {
-    btn.title = isEditing ? 'Jump to Decryption Tab' : 'Decrypt';
-    btn.setAttribute('aria-label', isEditing ? 'Jump to Decryption Tab' : 'Decrypt');
+    btn.title = isEditing ? 'Jump to Decryption' : 'Decrypt';
+    btn.setAttribute('aria-label', isEditing ? 'Jump to Decryption' : 'Decrypt');
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -88,7 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // --- Event Listeners ---
         editBtn.addEventListener('click', () => {
             cardElement.classList.add('editing');
-            setUseForDecryptBtnState(useForDecryptBtn, true); // Edit mode: jump to decryption tab
+            setUseForDecryptBtnState(useForDecryptBtn, true); // Edit mode: jump to the Data Panel
         });
 
         cancelBtn.addEventListener('click', () => {
@@ -142,16 +142,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const ciphertextInput = document.getElementById('ciphertextInput');
 
             if (cardElement.classList.contains('editing')) {
-                // Edit mode: jump to the decryption tab (fill ciphertext, switch mode and tab)
-                if (ciphertextInput && window.switchToTab && window.switchCryptoMode) {
+                // Edit mode: jump to the Data Panel (fill ciphertext, switch mode,
+                // scroll to the panel; there are no tabs anymore).
+                if (ciphertextInput && window.scrollToSection && window.switchCryptoMode) {
                     // 1. Set the value
                     ciphertextInput.value = passwordData.password;
 
                     // 2. Switch to the decryption input card (mutually exclusive mode)
                     window.switchCryptoMode('decrypt');
 
-                    // 3. Switch to the crypto tab
-                    window.switchToTab('crypto');
+                    // 3. Scroll to the Data Panel
+                    window.scrollToSection('dataPanel');
 
                     // 4. Focus the input for better UX
                     ciphertextInput.focus();
@@ -162,18 +163,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!window.switchCryptoMode) {
                         alert('Could not switch to decryption mode. The main script might have an issue.');
                     }
-                    if (!window.switchToTab) {
-                        alert('Could not switch tabs. The main script might have an issue.');
+                    if (!window.scrollToSection) {
+                        alert('Could not scroll to the Data Panel. The main script might have an issue.');
                     }
                 }
             } else {
-                // Normal (view) mode: decrypt the stored ciphertext directly, no page jump
-                if (ciphertextInput && window.triggerDecrypt) {
+                // Normal (view) mode: decrypt the stored ciphertext directly.
+                // Fill the decrypt pane (and switch the Data Panel to decrypt
+                // mode so the user sees exactly what was loaded), then run the
+                // decryption: the result is shown in the floating result
+                // window (modal), not inline.
+                if (ciphertextInput && window.switchCryptoMode && window.triggerDecrypt) {
                     // 1. Set the value (used by the decryption step)
                     ciphertextInput.value = passwordData.password;
 
-                    // 2. Run the decryption from the manager flow: the result is
-                    //    shown in the floating result window (modal), not inline.
+                    // 2. Show it in the Data Panel's decrypt pane
+                    window.switchCryptoMode('decrypt');
+
+                    // 3. Run the decryption from the manager flow
                     window.triggerDecrypt(true);
                 } else {
                     if (!ciphertextInput) {
@@ -237,29 +244,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // We need to render passwords when the tab becomes visible,
-    // because the page loads with it hidden.
-    // We can use a MutationObserver to detect when the 'active' class is added.
-    const parentTabContent = document.getElementById('password-manager');
-    if (parentTabContent) {
-        const observer = new MutationObserver((mutationsList) => {
-            for(const mutation of mutationsList) {
-                if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-                    const targetElement = mutation.target;
-                    if (targetElement.classList.contains('active')) {
-                        // The tab was just shown, so render the content.
-                        renderPasswords();
-                    }
-                }
-            }
-        });
+    // The Password Manager is a plain peer section on the single-page layout
+    // (no tabs): render the card list once the DOM is ready.
+    renderPasswords();
 
-        observer.observe(parentTabContent, { attributes: true });
-    }
-
-
-    // Initial render in case the tab is active on load (e.g. from a hash link)
-    if (document.getElementById('password-manager')?.classList.contains('active')) {
-        renderPasswords();
-    }
+    // Expose a refresh hook so other modules (e.g. the "Save to Password
+    // Manager" button in index.js) can refresh the card list after changes.
+    window.refreshPasswordList = () => renderPasswords();
 });

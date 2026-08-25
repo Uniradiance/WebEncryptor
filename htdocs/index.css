@@ -36,40 +36,28 @@ h2 {
     padding-bottom: 10px;
 }
 
-.tabs {
+/* Single-page layout: sections are stacked peers (no tabs).
+   Each section carries an h2 title styled by the global h2 rule below. */
+.page-header {
     display: flex;
-    margin-bottom: 20px;
-    border-bottom: 1px solid #ddd;
+    align-items: center;
+    justify-content: center;
+    position: relative;
 }
 
-.tab-button {
-    padding: 10px 20px;
-    cursor: pointer;
-    border: none;
-    background-color: transparent;
-    font-size: 1em;
-    color: #7f8c8d;
-    transition: all 0.3s ease;
-    border-bottom: 3px solid transparent;
+#moreOptionsButton {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
 }
 
-.tab-button.active {
-    color: #3498db;
-    border-bottom-color: #3498db;
-    font-weight: bold;
+.ui-section {
+    margin-bottom: 1.75rem;
 }
 
-.tab-button:hover:not(.active) {
-    color: #3498db;
-}
-
-.tab-content {
-    display: none;
-    animation: fadeIn 0.5s;
-}
-
-.tab-content.active {
-    display: block;
+.ui-section > h2 {
+    margin-bottom: 0.75rem;
 }
 
 @keyframes fadeIn {
@@ -370,11 +358,6 @@ h2 {
 
     h1 {
         font-size: 1.6em;
-    }
-
-    .tab-button {
-        padding: 8px 12px;
-        font-size: 0.9em;
     }
 
     .button {
@@ -815,13 +798,6 @@ h2 {
     border-color: #3498db;
     outline: none;
     box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
-}
-
-/* Shared secret factors section */
-.shared-factors {
-    border-top: 2px solid #eee;
-    padding-top: 1.25rem;
-    margin-top: 0.25rem;
 }
 
 /* Output area card (ciphertext / plaintext result) */

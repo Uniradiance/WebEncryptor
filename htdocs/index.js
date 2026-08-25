@@ -1,5 +1,4 @@
 
-
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.js'; // Ensure .js extension
@@ -36,9 +35,8 @@ const pasteCiphertextButton = document.getElementById('pasteCiphertextButton');
 
 // Decryption Result Floating Window
 const decryptResultDialog = getElement('decryptResultDialog');
-const closeDecryptResultButton = getElement('closeDecryptResultButton');
 const decryptResultText = getElement('decryptResultText');
-const copyDecryptResultButton = getElement('copyDecryptResultButton');
+const closeDecryptResultActionButton = getElement('closeDecryptResultActionButton');
 
 // UI State Elements
 const loadingIndicator = getElement('loadingIndicator');
@@ -47,8 +45,6 @@ const progressBarContainer = getElement('progressBarContainer');
 const progressBar = getElement('progressBar');
 const progressText = getElement('progressText');
 
-const tabs = document.querySelectorAll('.tab-button');
-const tabContents = document.querySelectorAll('.tab-content');
 const modeButtons = document.querySelectorAll('.mode-button');
 
 // Menu
@@ -143,6 +139,16 @@ modeButtons.forEach(btn => {
     });
 });
 
+// Smoothly scroll to a page section (the page has no tabs anymore: everything
+// is one scrolling page, sections are peers). Used by the Password Manager
+// when a card asks to "jump" to the Data Panel.
+window.scrollToSection = (id) => {
+    const el = document.getElementById(id);
+    if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+};
+
 // --- rule factor (factor C): hand-drawn pattern -> chain-code sequence ---
 const signaturePadCrypto = getElement('signaturePadCrypto');
 const sigPad = createSignaturePad(signaturePadCrypto);
@@ -199,22 +205,21 @@ function handleEncryptResponse(data) {
 let decryptOrigin = 'crypto'; // 'crypto' | 'manager'
 
 function handleUserDecryptResponse(data) {
-    if (decryptOrigin !== 'manager') {
-        // Crypto tab flow: never show the floating window (close a leftover one).
-        decryptResultDialog.style.display = 'none';
-    }
     if (data.status === 'success') {
         cryptoOutput.innerText = data.result;
         resetUIState();
         if (decryptOrigin === 'manager') {
+            // Manager flow: pop up the floating window with the decrypted text only.
             showDecryptResult(data.result);
+        } else {
+            // Crypto tab flow: never show the floating window (close a leftover one).
+            decryptResultDialog.style.display = 'none';
         }
     } else {
         cryptoOutput.innerText = '';
         resetUIState(`Decryption failed: ${data.error}`);
-        if (decryptOrigin === 'manager') {
-            showDecryptResult(`Decryption failed: ${data.error}`);
-        }
+        // Errors are never shown in the floating window (close a leftover one).
+        decryptResultDialog.style.display = 'none';
     }
 }
 
@@ -403,13 +408,16 @@ actionButton.addEventListener('click', () => {
     if (currentMode === 'encrypt') {
         performEncrypt();
     } else {
-        performDecrypt();
+        // Route through triggerDecrypt so decryptOrigin is always reset to
+        // 'crypto' (otherwise a previous Manager-card decrypt would leave it
+        // 'manager' and the floating window would pop up here too).
+        window.triggerDecrypt(false);
     }
 });
 
 // Expose it to global scope for other modules (e.g. Password Manager "Use for Decryption").
-// Pass true when the Password Manager card starts the decryption: the result
-// (or the error) is then shown in the floating result window (modal).
+// Pass true when the Password Manager card starts the decryption: the decrypted
+// text is then shown in the floating result window (modal); errors never pop up.
 window.triggerDecrypt = (fromManager = false) => {
     decryptOrigin = fromManager ? 'manager' : 'crypto';
     performDecrypt();
@@ -438,7 +446,7 @@ copyCiphertextButton.addEventListener('click', async () => {
     }
 });
 
-saveToManagerButton.addEventListener('click', () => {
+saveToManagerButton.addEventListener('click', async () => {
     const ciphertext = cryptoOutput.innerText;
     if (!ciphertext) {
         displayError('No ciphertext to save.');
@@ -453,7 +461,12 @@ saveToManagerButton.addEventListener('click', () => {
             password: ciphertext
         };
 
-        passwordService.addPassword(newPasswordEntry);
+        await passwordService.addPassword(newPasswordEntry);
+        // The Password Manager is a peer section on the same page now: refresh
+        // its card list so the new entry shows up immediately.
+        if (window.refreshPasswordList) {
+            window.refreshPasswordList();
+        }
 
         loadingIndicator.textContent = "Saved to Password Manager!";
         loadingIndicator.style.display = 'block';
@@ -552,66 +565,10 @@ async function getClipboardText() {
     }
 }
 
-closeDecryptResultButton.addEventListener('click', () => {
+// The single action button in the result window is a Close button: clicking it
+// closes the dialog directly (the old ❌ corner button was removed).
+closeDecryptResultActionButton.addEventListener('click', () => {
     decryptResultDialog.style.display = 'none';
-});
-
-copyDecryptResultButton.addEventListener('click', async () => {
-    const text = decryptResultText.innerText;
-    if (!text) {
-        return;
-    }
-    try {
-        await navigator.clipboard.writeText(text);
-        const originalLabel = copyDecryptResultButton.textContent;
-        copyDecryptResultButton.textContent = 'Copied!';
-        setTimeout(() => {
-            copyDecryptResultButton.textContent = originalLabel;
-        }, 1500);
-    } catch (err) {
-        console.error('Failed to copy decryption result: ', err);
-        displayError('Failed to copy decryption result. Check console for details.');
-    }
-});
-
-function switchToTab(tabId) {
-    tabs.forEach(t => {
-        if (t.dataset.tab === tabId) {
-            t.classList.add('active');
-        } else {
-            t.classList.remove('active');
-        }
-    });
-
-    tabContents.forEach(content => {
-        if (content.id === tabId) {
-            content.classList.add('active');
-            // One-time min-width fixup for the manager tab (bitwise & was a typo;
-            // use a data attribute instead of abusing a boolean attribute).
-            if (content.id == 'password-manager' && !content.dataset.sized) {
-                let baseWidth = content.getBoundingClientRect().width + 60;
-                if (baseWidth > content.parentNode.getBoundingClientRect().width) {
-                    baseWidth -= 20;
-                }
-                content.style.minWidth = `${baseWidth <= 700 ? baseWidth : 700}px`;
-                content.dataset.sized = '1';
-            }
-        } else {
-            content.classList.remove('active');
-        }
-    });
-    // Reset UI state when switching tabs
-    resetUIState();
-    cryptoOutput.innerText = '';
-}
-// Expose it to global scope for other modules
-window.switchToTab = switchToTab;
-
-tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-        const targetTabContentId = tab.getAttribute('data-tab');
-        switchToTab(targetTabContentId);
-    });
 });
 
 // Initialize React Component (single shared chessboard)
