@@ -57,6 +57,17 @@
             </div>
         </section>
 
+        <!-- ============ Sub-tabs: Data Panel ⇄ Password Manager (the three
+             factors above stay visible while switching) ============ -->
+        <div class="tabs" role="tablist" aria-label="Sections">
+            <button type="button" class="tab-button active" data-tab="data" role="tab"
+                aria-selected="true">Data Panel</button>
+            <button type="button" class="tab-button" data-tab="manager" role="tab"
+                aria-selected="false">Password Manager</button>
+        </div>
+
+        <!-- ============ Tab: Data Panel (input + ciphertext output) ============ -->
+        <div id="data" class="tab-content active" role="tabpanel">
         <!-- ============ Section 2: Data Panel (encrypt/decrypt input, freely switchable) ============ -->
         <section class="ui-section" id="dataPanel">
             <h2>Data Panel</h2>
@@ -159,8 +170,10 @@
             </div>
             <div id="errorDisplay" class="error-message" style="display: none;"></div>
         </section>
+        </div><!-- /#data -->
 
-        <!-- ============ Section 4: Password Manager (peer section, same level as Data Panel / Ciphertext) ============ -->
+        <!-- ============ Tab: Password Manager (peer tab, same level as Data Panel) ============ -->
+        <div id="manager" class="tab-content" role="tabpanel">
         <section class="ui-section" id="password-manager">
             <div class="pm-header">
                 <h2>Password Manager</h2>
@@ -170,6 +183,7 @@
                 <!-- Password cards will be injected here by JavaScript -->
             </div>
         </section>
+        </div><!-- /#manager -->
     </div>
 
     <!-- Password Generator Modal -->

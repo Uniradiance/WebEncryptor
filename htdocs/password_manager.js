@@ -142,19 +142,22 @@ document.addEventListener('DOMContentLoaded', () => {
             const ciphertextInput = document.getElementById('ciphertextInput');
 
             if (cardElement.classList.contains('editing')) {
-                // Edit mode: jump to the Data Panel (fill ciphertext, switch mode,
-                // scroll to the panel; there are no tabs anymore).
-                if (ciphertextInput && window.scrollToSection && window.switchCryptoMode) {
+                // Edit mode: jump to the Data Panel (fill ciphertext, switch to
+                // the Data Panel sub-tab + decrypt mode, then scroll to it).
+                if (ciphertextInput && window.switchToTab && window.scrollToSection && window.switchCryptoMode) {
                     // 1. Set the value
                     ciphertextInput.value = passwordData.password;
 
                     // 2. Switch to the decryption input card (mutually exclusive mode)
                     window.switchCryptoMode('decrypt');
 
-                    // 3. Scroll to the Data Panel
+                    // 3. Switch to the "Data Panel" sub-tab (the factors stay visible)
+                    window.switchToTab('data');
+
+                    // 4. Scroll to the Data Panel
                     window.scrollToSection('dataPanel');
 
-                    // 4. Focus the input for better UX
+                    // 5. Focus the input for better UX
                     ciphertextInput.focus();
                 } else {
                     if (!ciphertextInput) {
@@ -162,6 +165,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     if (!window.switchCryptoMode) {
                         alert('Could not switch to decryption mode. The main script might have an issue.');
+                    }
+                    if (!window.switchToTab) {
+                        alert('Could not switch to the Data Panel tab. The main script might have an issue.');
                     }
                     if (!window.scrollToSection) {
                         alert('Could not scroll to the Data Panel. The main script might have an issue.');
@@ -244,11 +250,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // The Password Manager is a plain peer section on the single-page layout
-    // (no tabs): render the card list once the DOM is ready.
-    renderPasswords();
-
+    // The Password Manager lives in its own sub-tab: the list is rendered
+    // lazily when the tab is first opened (index.js calls refreshPasswordList
+    // on every switch to the "manager" tab), so no password data is fetched
+    // while the user only works in the Data Panel.
     // Expose a refresh hook so other modules (e.g. the "Save to Password
-    // Manager" button in index.js) can refresh the card list after changes.
+    // Manager" button in index.js, or the sub-tab switch) can render/refresh
+    // the card list.
     window.refreshPasswordList = () => renderPasswords();
 });

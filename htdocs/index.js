@@ -139,9 +139,41 @@ modeButtons.forEach(btn => {
     });
 });
 
-// Smoothly scroll to a page section (the page has no tabs anymore: everything
-// is one scrolling page, sections are peers). Used by the Password Manager
-// when a card asks to "jump" to the Data Panel.
+// Sub-tabs below the factors section: "Data Panel" ⇄ "Password Manager".
+// The three secret factors stay visible while switching.
+const tabs = document.querySelectorAll('.tab-button');
+const tabContents = document.querySelectorAll('.tab-content');
+
+function switchToTab(tabId) {
+    tabs.forEach(t => {
+        const isActive = t.dataset.tab === tabId;
+        t.classList.toggle('active', isActive);
+        t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    tabContents.forEach(content => {
+        content.classList.toggle('active', content.id === tabId);
+    });
+    // Fresh manager data every time its tab is opened (e.g. saved from
+    // another browser tab since the last visit).
+    if (tabId === 'manager' && window.refreshPasswordList) {
+        window.refreshPasswordList();
+    }
+    // Reset UI state when switching tabs
+    resetUIState();
+    cryptoOutput.innerText = '';
+}
+// Expose it to global scope for other modules (e.g. the Password Manager
+// "jump to Data Panel" flow).
+window.switchToTab = switchToTab;
+
+tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+        switchToTab(tab.getAttribute('data-tab'));
+    });
+});
+
+// Smoothly scroll to a page section (used by the Password Manager when a
+// card asks to "jump" to the Data Panel after switching to its tab).
 window.scrollToSection = (id) => {
     const el = document.getElementById(id);
     if (el) {

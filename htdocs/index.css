@@ -36,6 +36,44 @@ h2 {
     padding-bottom: 10px;
 }
 
+/* Sub-tabs under the factors section: Data Panel ⇄ Password Manager.
+   The tab bar reuses the original tab look (blue underline on active). */
+.tabs {
+    display: flex;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #ddd;
+}
+
+.tab-button {
+    padding: 10px 20px;
+    cursor: pointer;
+    border: none;
+    background-color: transparent;
+    font-size: 1em;
+    color: #7f8c8d;
+    transition: all 0.3s ease;
+    border-bottom: 3px solid transparent;
+}
+
+.tab-button.active {
+    color: #3498db;
+    border-bottom-color: #3498db;
+    font-weight: bold;
+}
+
+.tab-button:hover:not(.active) {
+    color: #3498db;
+}
+
+.tab-content {
+    display: none;
+    animation: fadeIn 0.5s;
+}
+
+.tab-content.active {
+    display: block;
+}
+
 /* Single-page layout: sections are stacked peers (no tabs).
    Each section carries an h2 title styled by the global h2 rule below. */
 .page-header {
@@ -365,6 +403,11 @@ h2 {
         font-size: 0.95em;
         width: 100%;
         box-sizing: border-box;
+    }
+
+    .tab-button {
+        padding: 8px 12px;
+        font-size: 0.9em;
     }
 
     .output-group .button {
