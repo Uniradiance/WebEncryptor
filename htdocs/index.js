@@ -3,6 +3,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.js'; // Ensure .js extension
 import { passwordService } from './password_service.js';
+import { OperationState } from './operation_state.js';
 import { createSignaturePad } from './SignaturePad.js';
 
 const getElement = (id) => {
@@ -53,6 +54,32 @@ const moreOptionsMenu = document.getElementById('moreOptionsMenu');
 const shutdownButton = document.getElementById('shutdownButton');
 
 let cryptoWorker = null;
+const operations = new OperationState();
+let resultKind = null;
+let uiTimers = [];
+window.isCryptoBusy = () => operations.busy;
+
+function cancelUITimers() {
+    uiTimers.forEach(clearTimeout);
+    uiTimers = [];
+}
+function later(fn, delay) {
+    uiTimers.push(setTimeout(() => { if (!operations.busy) fn(); }, delay));
+}
+function syncBusyUI() {
+    const busy = operations.busy;
+    actionButton.disabled = busy || !operations.ready;
+    modeButtons.forEach(btn => { btn.disabled = busy; });
+    saveToManagerButton.disabled = busy || resultKind !== 'encrypt';
+    copyCiphertextButton.disabled = busy || !resultKind;
+    [passwordInput, plaintextInput, ciphertextInput, pastePlaintextButton,
+        pasteCiphertextButton, showGeneratePasswordModalButton, shutdownButton].forEach(el => { el.disabled = busy; });
+    window.reactAppRef.current?.setLocked?.(busy);
+    sigPad.setLocked(busy);
+    document.querySelectorAll('.use-for-decrypt-btn').forEach(btn => {
+        btn.disabled = busy || btn.closest('.pm-card')?.dataset.pending === 'true';
+    });
+}
 
 // Current operation mode: 'encrypt' | 'decrypt'
 let currentMode = 'encrypt';
@@ -69,9 +96,10 @@ function clearError() {
 }
 
 function resetUIState(errorMessage = null, successMessage = null) {
-    actionButton.disabled = false;
+    syncBusyUI();
+    cancelUITimers();
 
-    setTimeout(() => {
+    later(() => {
         loadingIndicator.style.display = 'none';
         progressBarContainer.style.display = 'none';
         progressBar.style.width = '0%';
@@ -88,7 +116,7 @@ function resetUIState(errorMessage = null, successMessage = null) {
         // Display temporary success message if needed (e.g., for validation)
         progressText.textContent = successMessage;
         progressBarContainer.style.display = 'block'; // Show progress bar area for this message
-        setTimeout(() => {
+        later(() => {
             if (progressText.textContent === successMessage) {
                 progressText.textContent = '';
                 // Only hide progress bar if it's not showing another message (e.g. error)
@@ -101,6 +129,8 @@ function resetUIState(errorMessage = null, successMessage = null) {
 }
 
 function startProcessing(message) {
+    cancelUITimers();
+    syncBusyUI();
     clearError();
     loadingIndicator.style.display = 'none'; // Hide loading indicator if it was shown
     progressBarContainer.style.display = 'block';
@@ -112,6 +142,8 @@ function startProcessing(message) {
 // Switch between the mutually exclusive input panes (Data to Encrypt / Ciphertext).
 // Only visibility changes: textarea contents are preserved.
 function setMode(mode) {
+    if (operations.busy) return false;
+    if (mode !== currentMode) { cryptoOutput.innerText = ''; resultKind = null; }
     currentMode = mode === 'decrypt' ? 'decrypt' : 'encrypt';
     const isEncrypt = currentMode === 'encrypt';
 
@@ -128,6 +160,8 @@ function setMode(mode) {
     actionButton.title = isEncrypt ? 'Encrypt Data' : 'Decrypt Data';
     actionButton.setAttribute('aria-label', isEncrypt ? 'Encrypt data' : 'Decrypt data');
     saveToManagerButton.style.display = isEncrypt ? '' : 'none';
+    syncBusyUI();
+    return true;
 }
 
 // Expose it to global scope for other modules (e.g. Password Manager "Use for Decryption")
@@ -158,9 +192,7 @@ function switchToTab(tabId) {
     if (tabId === 'manager' && window.refreshPasswordList) {
         window.refreshPasswordList();
     }
-    // Reset UI state when switching tabs
-    resetUIState();
-    cryptoOutput.innerText = '';
+    // Tabs never reset the active job, its progress, or its result.
 }
 // Expose it to global scope for other modules (e.g. the Password Manager
 // "jump to Data Panel" flow).
@@ -185,7 +217,10 @@ window.scrollToSection = (id) => {
 const signaturePadCrypto = getElement('signaturePadCrypto');
 const sigPad = createSignaturePad(signaturePadCrypto);
 
-function getRuleFactor() {
+function getRuleFactor(requireVerified = false) {
+    if (requireVerified && !sigPad.isVerified()) {
+        return { ok: false, error: 'Redraw your pattern and confirm the match before encrypting.' };
+    }
     const seq = sigPad.getSequence();
     if (!seq) {
         return { ok: false, error: sigPad.getStatus() || 'Draw your pattern on the pad first (at least 10 segments).' };
@@ -224,7 +259,7 @@ function getChessboardData(boardId, type, isUpperHalf = false) {
 function handleEncryptResponse(data) {
     if (data.status === 'success') {
         cryptoOutput.innerText = data.result; // Show encrypted data
-        resetUIState(null, 'Encryption successful.'); // No confirmation/verification step
+        resetUIState(null, 'Encryption successful.');
     } else { // Encryption failed
         cryptoOutput.innerText = '';
         resetUIState(`Encryption failed: ${data.error}`);
@@ -234,13 +269,13 @@ function handleEncryptResponse(data) {
 // Who initiated the decryption: the crypto tab itself, or the Password
 // Manager card's "Decrypt" button. The floating result window (modal) is only
 // shown for the manager flow; the crypto tab shows the result inline.
-let decryptOrigin = 'crypto'; // 'crypto' | 'manager'
 
-function handleUserDecryptResponse(data) {
+
+function handleUserDecryptResponse(data, origin) {
     if (data.status === 'success') {
         cryptoOutput.innerText = data.result;
         resetUIState();
-        if (decryptOrigin === 'manager') {
+        if (origin === 'manager') {
             // Manager flow: pop up the floating window with the decrypted text only.
             showDecryptResult(data.result);
         } else {
@@ -294,53 +329,49 @@ function initializeWorker() {
         cryptoWorker = new Worker('./crypto_worker.js'); // Ensure worker path is correct
 
         cryptoWorker.onmessage = (e) => {
-            if (e.data.status === 'progress') {
-                loadingIndicator.style.display = 'none'; // Should be hidden by startProcessing
-                progressBarContainer.style.display = 'block';
-                const { currentStep, totalSteps, stepName } = e.data;
-                if (typeof currentStep === 'number' && typeof totalSteps === 'number' && totalSteps > 0) {
-                    const percentage = Math.max(0, Math.min(100, (currentStep / totalSteps) * 100));
-                    progressBar.style.width = `${percentage}%`;
-                    progressText.textContent = stepName ? `${stepName} (${currentStep}/${totalSteps})` : `Step ${currentStep} of ${totalSteps}`;
-                }
-                // Button is already disabled by startProcessing
+            const data = e.data;
+            if (data.action === 'worker_init_sodium_ready') {
+                operations.ready = true;
+                syncBusyUI();
                 return;
             }
-
-            // Non-progress messages
-            try {
-                switch (e.data.action) {
-                    case 'encrypt':
-                        handleEncryptResponse(e.data);
-                        break;
-                    case 'decrypt': // This is for user-initiated decryption
-                        handleUserDecryptResponse(e.data);
-                        break;
-                    case 'worker_init_sodium_ready':
-                        break;
-                    case 'worker_init_sodium_failed':
-                        break;
-                    default:
-                        console.warn('Unknown worker action:', e.data.action, e.data);
-                        resetUIState(`Received unknown action from worker: ${e.data.action}`);
-                }
-            } catch (error) {
-                console.error('Error processing worker message:', error, e.data);
-                resetUIState(`Client-side error processing worker response: ${error.message}`);
+            if (data.action === 'worker_init_sodium_failed') {
+                operations.ready = false;
+                operations.finish();
+                resetUIState(data.error);
+                return;
             }
+            if (!operations.accepts(data)) return; // stale/unrelated results
+            if (data.status === 'progress') {
+                const { currentStep, totalSteps, stepName } = data;
+                progressBarContainer.style.display = 'block';
+                progressBar.style.width = `${Math.min(100, currentStep / totalSteps * 100)}%`;
+                progressText.textContent = `${stepName} (${currentStep}/${totalSteps})`;
+                return;
+            }
+            const job = operations.finish();
+            resultKind = data.status === 'success' ? job.action : null;
+            try {
+                if (job.action === 'encrypt') handleEncryptResponse(data);
+                else handleUserDecryptResponse(data, job.origin);
+            } catch (error) {
+                resultKind = null;
+                resetUIState(`Could not display result: ${error.message}`);
+            }
+            syncBusyUI();
         };
-
         cryptoWorker.onerror = (e) => {
-            console.error('Worker critical error:', e);
-            resetUIState(`Worker critical error: ${e.message}. Please refresh the page or check browser console.`);
-            // Optionally, try to re-initialize or disable functionality
+            operations.ready = false;
+            operations.finish();
+            resultKind = null;
+            resetUIState(`Crypto worker failed: ${e.message}. Refresh to retry.`);
         };
 
         // Indicate worker is ready or initializing.
         // resetUIState will hide loadingIndicator eventually if no errors.
         loadingIndicator.textContent = "Worker initialized.";
         loadingIndicator.style.display = 'block';
-        setTimeout(() => {
+        later(() => {
             if (loadingIndicator.textContent === "Worker initialized.") {
                 loadingIndicator.style.display = 'none';
             }
@@ -355,94 +386,49 @@ function initializeWorker() {
 }
 
 
-function performEncrypt() {
-    if (!cryptoWorker) {
-        displayError("Crypto worker not initialized. Please refresh.");
-        return;
+function performOperation(action, origin = 'crypto') {
+    if (operations.busy) return false;
+    if (!cryptoWorker || !operations.ready) {
+        displayError('Encryption is still initializing. Please wait.');
+        return false;
     }
-    const plaintext = plaintextInput.value;
+    const input = action === 'encrypt' ? plaintextInput.value : ciphertextInput.value;
     const password = passwordInput.value;
-
-    if (!plaintext || !password) {
-        displayError('Data and Password are required for encryption.');
-        return;
+    if (!input || !password) {
+        displayError('Enter the data and your password first.');
+        return false;
     }
-    const factor = getRuleFactor();
-    if (!factor.ok) {
-        displayError(`Rule Factor: ${factor.error}`);
-        return;
-    }
-
+    const factor = getRuleFactor(action === 'encrypt');
+    if (!factor.ok) { displayError(factor.error); return false; }
     try {
         const path = getChessboardData('cryptoBoard', 'full');
-        startProcessing('Encrypting...');
-        cryptoOutput.innerText = ''; // Clear previous output
-        cryptoWorker.postMessage({
-            action: 'encrypt',
-            plaintext,
-            password,
-            rulePhrase: factor.value,
-            path,
+        if (!path) { displayError('Select cells to set your grid first.'); return false; }
+        const job = operations.begin(action, origin);
+        if (!job) return false;
+        resultKind = null;
+        cryptoOutput.innerText = '';
+        decryptResultDialog.style.display = 'none';
+        startProcessing(action === 'encrypt' ? 'Encrypting…' : 'Decrypting…');
+        cryptoWorker.postMessage({ ...job,
+            ...(action === 'encrypt' ? { plaintext: input } : { ciphertext: input }),
+            password, rulePhrase: factor.value, path,
         });
-        // Decoy refresh of the grid board: never allowed to affect the crypto flow
-        // (the component may not be mounted yet in exotic load orders).
-        try {
-            window.reactAppRef.current?.shuffleCellColors?.();
-        } catch (err) {
-            console.warn('shuffleCellColors skipped:', err && err.message ? err.message : err);
-        }
+        window.reactAppRef.current?.hide?.();
+        return true;
     } catch (err) {
-        displayError(`Chessboard error for encryption: ${err.message}`);
+        operations.finish();
+        resetUIState(`Could not start operation: ${err.message}`);
+        return false;
     }
 }
-
-function performDecrypt() {
-    if (!cryptoWorker) {
-        displayError("Crypto worker not initialized. Please refresh.");
-        return;
-    }
-    const ciphertext = ciphertextInput.value;
-    const password = passwordInput.value;
-
-    if (!ciphertext || !password) {
-        displayError('Ciphertext and Password are required for decryption.');
-        return;
-    }
-    const factor = getRuleFactor();
-    if (!factor.ok) {
-        displayError(`Rule Factor: ${factor.error}`);
-        return;
-    }
-
-    try {
-        const path = getChessboardData('cryptoBoard', 'full');
-        startProcessing('Decrypting...');
-        cryptoOutput.innerText = ''; // Clear previous output
-        cryptoWorker.postMessage({
-            action: 'decrypt',
-            ciphertext,
-            password,
-            rulePhrase: factor.value,
-            path,
-        });
-        // Decoy refresh of the grid board; never allowed to break the crypto flow.
-        try {
-            window.reactAppRef.current?.shuffleCellColors?.();
-        } catch (err) {
-            console.warn('shuffleCellColors skipped:', err && err.message ? err.message : err);
-        }
-    } catch (err) {
-        displayError(`Chessboard error for decryption: ${err.message}`);
-    }
-}
+function performEncrypt() { return performOperation('encrypt'); }
 
 actionButton.addEventListener('click', () => {
     if (currentMode === 'encrypt') {
         performEncrypt();
     } else {
-        // Route through triggerDecrypt so decryptOrigin is always reset to
-        // 'crypto' (otherwise a previous Manager-card decrypt would leave it
-        // 'manager' and the floating window would pop up here too).
+        // The origin belongs to the request, so previous Manager operations
+        // cannot route this result to the floating window.
         window.triggerDecrypt(false);
     }
 });
@@ -451,14 +437,14 @@ actionButton.addEventListener('click', () => {
 // Pass true when the Password Manager card starts the decryption: the decrypted
 // text is then shown in the floating result window (modal); errors never pop up.
 window.triggerDecrypt = (fromManager = false) => {
-    decryptOrigin = fromManager ? 'manager' : 'crypto';
-    performDecrypt();
+    return performOperation('decrypt', fromManager ? 'manager' : 'crypto');
 };
 
 copyCiphertextButton.addEventListener('click', async () => {
+    if (operations.busy) return;
     if (!cryptoOutput.innerText) {
         displayError('No output to copy.');
-        setTimeout(() => { if (errorDisplay.textContent === 'No output to copy.') clearError(); }, 2000);
+        later(() => { if (errorDisplay.textContent === 'No output to copy.') clearError(); }, 2000);
         return;
     }
     try {
@@ -466,11 +452,11 @@ copyCiphertextButton.addEventListener('click', async () => {
         copyCiphertextButton.disabled = true;
         loadingIndicator.textContent = "The copy has been successful.";
         loadingIndicator.style.display = 'block';
-        setTimeout(() => {
+        later(() => {
             if (loadingIndicator.textContent === "The copy has been successful.") {
                 loadingIndicator.style.display = 'none';
             }
-            copyCiphertextButton.disabled = false;
+            syncBusyUI();
         }, 1500);
     } catch (err) {
         console.error('Failed to copy output: ', err);
@@ -480,12 +466,17 @@ copyCiphertextButton.addEventListener('click', async () => {
 
 saveToManagerButton.addEventListener('click', async () => {
     const ciphertext = cryptoOutput.innerText;
-    if (!ciphertext) {
+    if (operations.busy) return;
+    if (resultKind !== 'encrypt' || !ciphertext.startsWith('WE2.')) {
         displayError('No ciphertext to save.');
-        setTimeout(() => { if (errorDisplay.textContent === 'No ciphertext to save.') clearError(); }, 2000);
+        later(() => { if (errorDisplay.textContent === 'No ciphertext to save.') clearError(); }, 2000);
         return;
     }
 
+    operations.saving = true;
+    clearError();
+    cancelUITimers();
+    syncBusyUI();
     try {
         const newPasswordEntry = {
             name: `Encrypted Data (${new Date().toLocaleDateString()})`,
@@ -496,13 +487,11 @@ saveToManagerButton.addEventListener('click', async () => {
         await passwordService.addPassword(newPasswordEntry);
         // The Password Manager is a peer section on the same page now: refresh
         // its card list so the new entry shows up immediately.
-        if (window.refreshPasswordList) {
-            window.refreshPasswordList();
-        }
+        if (window.refreshPasswordList) window.refreshPasswordList();
 
         loadingIndicator.textContent = "Saved to Password Manager!";
         loadingIndicator.style.display = 'block';
-        setTimeout(() => {
+        later(() => {
             if (loadingIndicator.textContent === "Saved to Password Manager!") {
                 loadingIndicator.style.display = 'none';
             }
@@ -510,7 +499,11 @@ saveToManagerButton.addEventListener('click', async () => {
 
     } catch (err) {
         console.error('Failed to save to Password Manager: ', err);
-        displayError('Failed to save to Password Manager. Check console for details.');
+        displayError(`Save was not confirmed: ${err.message}`);
+        if (window.refreshPasswordList) window.refreshPasswordList();
+    } finally {
+        operations.saving = false;
+        syncBusyUI();
     }
 });
 
@@ -611,4 +604,5 @@ cell_root.render(React.createElement(App));
 setMode('encrypt');
 
 // Initialize the worker last, after UI is set up
+syncBusyUI();
 initializeWorker();

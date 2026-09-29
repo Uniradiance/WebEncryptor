@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { ROWS, COLS, COL_LABELS, ROW_LABELS, COLOR_SEQUENCE } from './constants.js'; // Added .js
+import React, { useState, useEffect, useCallback, useRef, useMemo, useReducer } from 'react';
+import { ROWS, COLS, COL_LABELS, ROW_LABELS } from './constants.js'; // Added .js
 import Cell from './Cell.js'; // Added .js
+import { initialGrid, gridReducer, gridPath, orderedCells } from './grid_state.js';
 import { compareCellIds } from './sortUtils.js'; // Added .js
 // Removed: import { CellData, CellColor } from './types';
 
@@ -37,19 +38,12 @@ const ResetIcon = ({ color = 'currentColor', size = 20 }) => (
 );
 
 const App = () => {
-  const initialCells = useCallback(() => {
-    return Array.from({ length: ROWS }, (_, r) =>
-      Array.from({ length: COLS }, (_, c) => ({
-        id: `${COL_LABELS[c]}${ROW_LABELS[r]}`,
-        row: r,
-        col: c,
-        color: null,
-      }))
-    );
-  }, []);
-
-  const [cells, setCells] = useState(initialCells());
-  const [displayCells, setDisplayCells] = useState(initialCells());
+  const [gridState, dispatchGrid] = useReducer(gridReducer, undefined, initialGrid);
+  const cells = gridState.cells;
+  const [hidden, setHidden] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const ordered = useMemo(() => orderedCells(cells), [cells]);
+  const orderLabels = Object.fromEntries(ordered.map((cell, i) => [cell.id, i + 1]));
   const [isPressing, setIsPressing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [interactionOriginCell, setInteractionOriginCell] = useState(null);
@@ -72,9 +66,6 @@ const App = () => {
     return remValue * parseFloat(getComputedStyle(document.documentElement).fontSize);
   }, []);
 
-  useEffect(() => {
-    setDisplayCells(cells);
-  }, [cells]);
 
   useEffect(() => {
     const calculateCellSize = () => {
@@ -129,25 +120,12 @@ const App = () => {
     return () => window.removeEventListener('resize', handleResizeFooterFont);
   }, []);
 
-  // Immutable update that clones only the affected row (drag painting updates a
-  // single cell at a time; cloning 36 cells per pointer event is wasteful).
-  const updateCellColor = useCallback((row, col, newColor, timestamp) => {
-    setCells(prevCells => {
-      const newCells = prevCells.slice();
-      const newRow = prevCells[row].slice();
-      const updated = { ...newRow[col], color: newColor };
-      if (newColor !== null && timestamp) {
-        updated.lastSetTimestamp = timestamp;
-      } else if (newColor === null) {
-        delete updated.lastSetTimestamp;
-      }
-      newRow[col] = updated;
-      newCells[row] = newRow;
-      return newCells;
-    });
+  const updateCellColor = useCallback((row, col, color) => {
+    dispatchGrid({ type: 'paint', row, col, color });
   }, []);
 
   const handleCellInteractionStart = useCallback((row, col, type) => {
+    if (hidden || locked) return;
     const currentTime = Date.now();
 
     if (type === 'mouse' &&
@@ -177,10 +155,10 @@ const App = () => {
     lastInteractionTypeRef.current = type;
     lastInteractionTimeRef.current = currentTime;
 
-  }, [cells]);
+  }, [cells, hidden, locked]);
 
   const handlePointerMoveOverCell = useCallback((row, col, id) => {
-    if (isPressingRef.current && interactionOriginCell && id !== interactionOriginCell.id) {
+    if (!hidden && !locked && isPressingRef.current && interactionOriginCell && id !== interactionOriginCell.id) {
       const originCellState = cells[interactionOriginCell.row][interactionOriginCell.col];
       const dragPaintColor = originCellState.color;
       if (dragPaintColor === null) return false;
@@ -192,19 +170,9 @@ const App = () => {
       return true;
     }
     return false;
-  }, [isDragging, interactionOriginCell, cells, updateCellColor]);
+  }, [isDragging, interactionOriginCell, cells, updateCellColor, hidden, locked]);
 
-  const generateFullDataString = useCallback(() => {
-    const coloredCells = [];
-    cells.flat().forEach(cell => {
-      if (cell.color !== null && cell.lastSetTimestamp) {
-        coloredCells.push(cell);
-      }
-    });
-    coloredCells.sort((a, b) => (a.lastSetTimestamp || 0) - (b.lastSetTimestamp || 0));
-    const data = coloredCells.map(cell => `${cell.color}${cell.id}`).join('');
-    return data;
-  }, [cells]);
+  const generateFullDataString = useCallback(() => gridPath(cells), [cells]);
 
   const generateHalfDataString = useCallback((isUpperHalf) => {
     const targetRows = isUpperHalf ? [0, 1, 2] : [3, 4, 5];
@@ -222,20 +190,6 @@ const App = () => {
     return data;
   }, [cells]);
 
-  const shuffleCellColors = useCallback(() => {
-    const availableColors = COLOR_SEQUENCE;
-    const newDisplayCells = Array.from({ length: ROWS }, (_, r) =>
-      Array.from({ length: COLS }, (_, c) => ({
-        id: `${COL_LABELS[c]}${ROW_LABELS[r]}`,
-        row: r,
-        col: c,
-        color: availableColors[Math.floor(Math.random() * (availableColors.length - 2) + 1)],
-      }))
-    );
-    setDisplayCells(newDisplayCells);
-  }, []);
-
-
   useEffect(() => {
     const handleGlobalInteractionEnd = (event) => {
       const currentTime = Date.now();
@@ -247,7 +201,7 @@ const App = () => {
         lastInteractionTimeRef.current = currentTime;
       }
 
-      if (isPressingRef.current && interactionOriginCell) {
+      if (!hidden && !locked && isPressingRef.current && interactionOriginCell) {
         if (!isDragging) {
           let targetCellElement = null;
           let eventProcessedForClick = false;
@@ -299,7 +253,7 @@ const App = () => {
     };
 
     const handleDocumentTouchMove = (event) => {
-      if (!isPressingRef.current || !interactionOriginCell) return;
+      if (hidden || locked || !isPressingRef.current || !interactionOriginCell) return;
 
       const touch = event.touches[0];
       const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
@@ -329,7 +283,8 @@ const App = () => {
       getFullData: generateFullDataString,
       getHalfData: generateHalfDataString,
       getCells: () => [...cells],
-      shuffleCellColors: shuffleCellColors,
+      hide: () => setHidden(true),
+      setLocked,
     };
 
     return () => {
@@ -338,7 +293,7 @@ const App = () => {
       document.removeEventListener('touchcancel', handleGlobalInteractionEnd);
       document.removeEventListener('touchmove', handleDocumentTouchMove);
     };
-  }, [isDragging, interactionOriginCell, nextColorForOriginOrDrag, handlePointerMoveOverCell, updateCellColor, cells, COL_LABELS, ROW_LABELS, generateFullDataString, generateHalfDataString, shuffleCellColors]);
+  }, [isDragging, interactionOriginCell, nextColorForOriginOrDrag, handlePointerMoveOverCell, updateCellColor, cells, COL_LABELS, ROW_LABELS, generateFullDataString, generateHalfDataString, hidden, locked]);
 
   // Memoized so re-renders skip recalculation when nothing changed
   const hasActiveCells = useMemo(() => {
@@ -347,31 +302,11 @@ const App = () => {
     );
   }, [cells]); // depends on cells state
 
-  const handleUndo = useCallback(() => {
-    const coloredCells = [];
-    cells.flat().forEach(cell => {
-      if (cell.color !== null && cell.lastSetTimestamp) {
-        coloredCells.push(cell);
-      }
-    });
-    coloredCells.sort((a, b) => (a.lastSetTimestamp || 0) - (b.lastSetTimestamp || 0));
-
-    if (coloredCells.length > 0) {
-      const targetId = coloredCells[coloredCells.length - 1].id;
-      setCells(prevCells =>
-        prevCells.map(row => {
-          // clone only the row that contains the target cell
-          if (!row.some(c => c.id === targetId)) return row;
-          return row.map(c => (c.id === targetId ? { ...c, color: null } : c));
-        })
-      );
-    }
-
-  }, []);
-
+  const handleUndo = useCallback(() => dispatchGrid({ type: 'undo' }), []);
   const handleReset = useCallback(() => {
-    setCells(initialCells());
-  }, [initialCells]);
+    dispatchGrid({ type: 'reset' });
+    setHidden(false);
+  }, []);
 
   // Styles
   const appStyle = {
@@ -418,7 +353,7 @@ const App = () => {
     paddingLeft: `calc(${ROW_LABEL_WIDTH_REM}rem + ${LABELS_CONTAINER_MARGIN_REM}rem + ${GRID_PADDING_REM}rem)`,
     boxSizing: 'border-box',
     width: '100%',
-    minWidth: '100rem',
+    minWidth: 0,
   };
 
   const baseLabelStyle = {
@@ -500,6 +435,12 @@ const App = () => {
 
   return (
     React.createElement('div', { style: appStyle },
+      React.createElement('div', { className: 'grid-status', role: 'status', 'aria-live': 'polite' },
+        React.createElement('span', null, hidden ? 'Grid hidden. Your selected cells are retained.' :
+          ordered.length ? `Grid ready: ${ordered.length} selected cells. Numbers show the order used for encryption.` : 'Select cells to set your grid.'),
+        React.createElement('button', { type: 'button', disabled: !ordered.length || locked,
+          onClick: () => setHidden(value => !value), 'aria-pressed': hidden }, hidden ? 'Show grid' : 'Hide grid')
+      ),
       React.createElement('div', { style: gridAndControlsContainerStyle },
         React.createElement('div', { style: mainGridContainerStyle },
           React.createElement('div', { style: colLabelsContainerStyle },
@@ -520,11 +461,14 @@ const App = () => {
               ))
             ),
             React.createElement('div', { style: actualGridStyle, ref: actualGridRef },
-              displayCells.map((row) =>
+              cells.map((row) =>
                 row.map((cellData) => (
                   React.createElement(Cell, {
                     key: cellData.id,
                     cellData: cellData,
+                    hidden,
+                    disabled: hidden || locked,
+                    order: orderLabels[cellData.id],
                     onInteractionStart: handleCellInteractionStart,
                     onPointerEnter: handlePointerMoveOverCell,
                   })
@@ -534,12 +478,12 @@ const App = () => {
             React.createElement('div', { style: actionsPanelStyle },
               React.createElement('button', {
                 onClick: handleUndo,
-                style: actionIconButtonStyle(!hasActiveCells, undoHovered),
+                style: actionIconButtonStyle(!gridState.history.length || locked, undoHovered),
                 onMouseEnter: () => setUndoHovered(true),
                 onMouseLeave: () => setUndoHovered(false),
                 'aria-label': "Undo cell change",
                 title: "Undo Change",
-                disabled: !hasActiveCells,
+                disabled: !gridState.history.length || hidden || locked,
               }, React.createElement(UndoIcon, { size: iconSize })),
               React.createElement('button', {
                 onClick: handleReset,
@@ -548,7 +492,7 @@ const App = () => {
                 onMouseLeave: () => setResetHovered(false),
                 'aria-label': "Reset entire grid",
                 title: "Reset Grid",
-                disabled: !hasActiveCells,
+                disabled: !hasActiveCells || locked,
               }, React.createElement(ResetIcon, { size: iconSize }))
             )
           )

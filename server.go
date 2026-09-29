@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -58,6 +59,18 @@ type PasswordEntry struct {
 	Password    string `json:"password"`
 }
 
+// Base64 expansion of 4 MiB UTF-8 plaintext plus salt, nonce, tag and separators.
+const maxPlaintextBytes = 4 * 1024 * 1024
+const maxPasswordBytes = 4*((maxPlaintextBytes+2)/3) + 71
+const maxNameBytes = 4096
+const maxDescriptionBytes = 65536
+const maxRequestBytes = 32 * 1024 * 1024
+
+type databaseFile struct {
+	NextID  int             `json:"nextId"`
+	Entries []PasswordEntry `json:"entries"`
+}
+
 type server struct {
 	mu     sync.Mutex
 	db     []PasswordEntry
@@ -71,47 +84,104 @@ var httpSrv *http.Server
 // --- database persistence ---
 
 func (s *server) loadDB() error {
-	s.nextID = 1 // ids start at 1
 	data, err := os.ReadFile(s.dbPath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			s.db, s.nextID = []PasswordEntry{}, 1
 			log.Printf("Database file '%s' does not exist; starting with an empty database.", s.dbPath)
 			return nil
 		}
 		return err
 	}
-	if err := json.Unmarshal(data, &s.db); err != nil {
-		log.Printf("Error: cannot parse '%s'; starting with an empty database.", s.dbPath)
-		s.db = nil
-		return nil
+	var stored databaseFile
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&stored); err != nil {
+		return fmt.Errorf("cannot parse database %s (original file preserved): %w", s.dbPath, err)
 	}
-	for _, p := range s.db {
-		if p.ID >= s.nextID {
-			s.nextID = p.ID + 1
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return errors.New("database must contain one JSON object (original file preserved)")
+	}
+	if stored.NextID < 1 || stored.Entries == nil {
+		return errors.New("invalid database nextId or entries (original file preserved)")
+	}
+	entries, nextID := stored.Entries, stored.NextID
+	seen := make(map[int]bool, len(entries))
+	for _, p := range entries {
+		if p.ID < 1 || p.ID == int(^uint(0)>>1) || uint64(p.ID) >= 1<<53 || seen[p.ID] {
+			return fmt.Errorf("invalid or duplicate database ID %d (original file preserved)", p.ID)
+		}
+		seen[p.ID] = true
+		if p.ID >= nextID {
+			return errors.New("database nextId must exceed all record IDs (original file preserved)")
 		}
 	}
+	if uint64(nextID) > 1<<53 {
+		return errors.New("database nextId exceeds the safe integer range (original file preserved)")
+	}
+	s.db, s.nextID = entries, nextID
 	log.Printf("Loaded %d password records from '%s'.", len(s.db), s.dbPath)
 	return nil
 }
 
-// saveDB writes atomically: temp file first, then rename, so a crash never
-// leaves a half-written database behind.
-func (s *server) saveDB() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	data, err := json.MarshalIndent(s.db, "", "    ")
+// commitDB must be called with s.mu held. Publish memory only after rename;
+// sync both the new file and (on Unix) its directory before acknowledging it.
+func (s *server) commitDB(next []PasswordEntry) error {
+	nextID := s.nextID
+	for _, entry := range next {
+		if entry.ID >= nextID {
+			nextID = entry.ID + 1
+		}
+	}
+	data, err := json.MarshalIndent(databaseFile{NextID: nextID, Entries: next}, "", "    ")
 	if err != nil {
 		return err
 	}
-	tmp := s.dbPath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	dir := filepath.Dir(s.dbPath)
+	f, err := os.CreateTemp(dir, ".passwords-*")
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, s.dbPath); err != nil {
+	defer os.Remove(f.Name())
+	if _, err = f.Write(data); err != nil {
+		f.Close()
 		return err
 	}
-	log.Printf("Database saved to '%s' (%d records).", s.dbPath, len(s.db))
+	if err = f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(f.Name(), s.dbPath); err != nil {
+		return err
+	}
+	// Rename committed the file: keep memory consistent even if directory
+	// sync subsequently fails. That failure still produces an API error.
+	s.db, s.nextID = next, nextID
+	if runtime.GOOS != "windows" {
+		d, err := os.Open(dir)
+		if err != nil {
+			return err
+		}
+		err = d.Sync()
+		closeErr := d.Close()
+		if err != nil {
+			return err
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	log.Printf("Database saved to '%s' (%d records).", s.dbPath, len(next))
 	return nil
+}
+
+func databaseError(w http.ResponseWriter, err error) {
+	log.Printf("Database persistence failed: %v", err)
+	writeJSON(w, http.StatusInternalServerError, map[string]string{
+		"error": "Could not confirm saving to disk. Refresh the list before retrying."})
 }
 
 // --- HTTP helpers ---
@@ -124,6 +194,57 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func methodNotAllowed(w http.ResponseWriter) {
 	writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method Not Allowed"})
+}
+
+type passwordUpdate struct {
+	Name, Description, Password *string
+}
+
+// Read the entire bounded body: reject trailing JSON and oversized requests
+// even when a valid object appears at the beginning.
+func decodePasswordUpdate(w http.ResponseWriter, r *http.Request) (passwordUpdate, bool) {
+	var update passwordUpdate
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBytes))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "Request exceeds the 32 MiB JSON limit."})
+		} else {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Could not read request body."})
+		}
+		return update, false
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Expected one JSON object."})
+		return update, false
+	}
+	for field, raw := range fields {
+		var target **string
+		var limit int
+		switch field {
+		case "name":
+			target, limit = &update.Name, maxNameBytes
+		case "description":
+			target, limit = &update.Description, maxDescriptionBytes
+		case "password":
+			target, limit = &update.Password, maxPasswordBytes
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Unknown field: " + field})
+			return update, false
+		}
+		var value string
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, &value) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": field + " must be a string (null is not allowed)."})
+			return update, false
+		}
+		if len(value) > limit {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": fmt.Sprintf("%s exceeds %d UTF-8 bytes.", field, limit)})
+			return update, false
+		}
+		*target = &value
+	}
+	return update, true
 }
 
 // statusRecorder captures the status code for access logs.
@@ -229,16 +350,16 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 			writeJSON(w, http.StatusOK, list)
 		case http.MethodPost:
-			var body struct {
-				Name        *string `json:"name"`
-				Description *string `json:"description"`
-				Password    *string `json:"password"`
-			}
-			if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Bad Request: " + err.Error()})
+			body, ok := decodePasswordUpdate(w, r)
+			if !ok {
 				return
 			}
 			s.mu.Lock()
+			if s.nextID == int(^uint(0)>>1) || uint64(s.nextID) >= 1<<53 {
+				s.mu.Unlock()
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Record ID space exhausted."})
+				return
+			}
 			entry := PasswordEntry{ID: s.nextID}
 			if body.Name != nil {
 				entry.Name = *body.Name
@@ -249,11 +370,12 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 			if body.Password != nil {
 				entry.Password = *body.Password
 			}
-			s.db = append(s.db, entry)
-			s.nextID++
+			next := append(append([]PasswordEntry{}, s.db...), entry)
+			err := s.commitDB(next)
 			s.mu.Unlock()
-			if err := s.saveDB(); err != nil {
-				log.Printf("Failed to save database: %v", err)
+			if err != nil {
+				databaseError(w, err)
+				return
 			}
 			writeJSON(w, http.StatusCreated, entry)
 		default:
@@ -268,16 +390,16 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		switch r.Method {
 		case http.MethodPut:
-			var body map[string]any
-			if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Bad Request: Invalid JSON."})
+			body, ok := decodePasswordUpdate(w, r)
+			if !ok {
 				return
 			}
 			s.mu.Lock()
+			next := append([]PasswordEntry{}, s.db...)
 			var target *PasswordEntry
-			for i := range s.db {
-				if s.db[i].ID == id {
-					target = &s.db[i]
+			for i := range next {
+				if next[i].ID == id {
+					target = &next[i]
 					break
 				}
 			}
@@ -286,39 +408,43 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("Password with id %d not found.", id)})
 				return
 			}
-			if v, ok := body["name"]; ok {
-				target.Name = fmt.Sprintf("%v", v)
+			if body.Name != nil {
+				target.Name = *body.Name
 			}
-			if v, ok := body["description"]; ok {
-				target.Description = fmt.Sprintf("%v", v)
+			if body.Description != nil {
+				target.Description = *body.Description
 			}
-			if v, ok := body["password"]; ok {
-				target.Password = fmt.Sprintf("%v", v)
+			if body.Password != nil {
+				target.Password = *body.Password
 			}
 			updated := *target
+			err := s.commitDB(next)
 			s.mu.Unlock()
-			if err := s.saveDB(); err != nil {
-				log.Printf("Failed to save database: %v", err)
+			if err != nil {
+				databaseError(w, err)
+				return
 			}
 			writeJSON(w, http.StatusOK, updated)
 		case http.MethodDelete:
 			s.mu.Lock()
 			before := len(s.db)
-			filtered := s.db[:0]
+			filtered := make([]PasswordEntry, 0, len(s.db))
 			for _, p := range s.db {
 				if p.ID != id {
 					filtered = append(filtered, p)
 				}
 			}
-			s.db = filtered
-			removed := len(s.db) != before
-			s.mu.Unlock()
+			removed := len(filtered) != before
 			if !removed {
+				s.mu.Unlock()
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("Password with id %d not found.", id)})
 				return
 			}
-			if err := s.saveDB(); err != nil {
-				log.Printf("Failed to save database: %v", err)
+			err := s.commitDB(filtered)
+			s.mu.Unlock()
+			if err != nil {
+				databaseError(w, err)
+				return
 			}
 			w.WriteHeader(http.StatusNoContent)
 		default:

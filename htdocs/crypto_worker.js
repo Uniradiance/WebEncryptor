@@ -1,5 +1,5 @@
 // crypto_worker.js
-// WebEncryptor v2 crypto core
+// WebEncryptor crypto core
 //
 // Scheme (three factors + single-layer AEAD):
 //   Factor A: master password
@@ -14,18 +14,9 @@
 //   4. masterKey    = Argon2id(password, argonSalt, OPSLIMIT_MODERATE,
 //                      MEMLIMIT_MODERATE (256 MiB), ARGON2ID13)
 //   5. encKey       = HKDF-SHA256(IKM=masterKey, salt=randomSalt,
-//                      info="WebEncryptor:enc:v1")
-//   6. single-layer ChaCha20-Poly1305-IETF, AAD="WebEncryptor:v1", 12-byte IV
-//   Output: WE1.<b64(salt)>.<b64(iv)>.<b64(ct)>.<b64(mac)>
-//
-// vs the old multi-layer AES/ChaCha scheme:
-//   - each attacker guess costs exactly one Argon2id, same as a legitimate
-//     user (the old scheme cost the user layers+1 KDF evaluations);
-//   - rule execution via new Function was removed (no code-injection surface);
-//   - all three factors are folded into the KDF salt: leaking one still leaves
-//     the others.
-//
-// Note: WE1. ciphertexts are incompatible with old multi-layer ciphertexts.
+//                      info="WebEncryptor:enc:v2")
+//   6. single-layer ChaCha20-Poly1305-IETF, AAD="WebEncryptor:v2", 12-byte IV
+//   Output: WE2.<b64(salt)>.<b64(iv)>.<b64(ct)>.<b64(mac)>
 
 importScripts("sodium.js");
 
@@ -60,22 +51,23 @@ const sodiumReadyPromise = (async () => {
     error: "Failed to initialize sodium.js. Crypto functions may fail.",
   });
   sodiumInstance = null;
-  throw e;
+  return null;
 });
 
 // --- constants ---
-const FORMAT_PREFIX = "WE1."; // format version prefix
+const FORMAT_PREFIX = "WE2.";
 const SALT_LENGTH = 16; // libsodium crypto_pwhash_SALTBYTES
 const IV_LENGTH = 12; // ChaCha20-Poly1305 IETF nonce length
 const KEY_LENGTH = 32; // 256-bit
 const TAG_LENGTH = 16; // 128-bit MAC
-const HKDF_INFO = "WebEncryptor:enc:v1";
-const AAD = new TextEncoder().encode("WebEncryptor:v1");
+const HKDF_INFO = "WebEncryptor:enc:v2";
+const AAD = new TextEncoder().encode("WebEncryptor:v2");
 const MAX_RULE_LENGTH = 2048; // chain-code length cap (chars)
 const MAX_PATH_LENGTH = 65536; // color-grid path length cap (chars)
 const MAX_PASSWORD_LENGTH = 4096; // password length cap (chars)
-const MAX_PLAINTEXT_LENGTH = 4 * 1024 * 1024; // ~4 MiB plaintext cap (chars)
-const MAX_CIPHERTEXT_LENGTH = 6 * 1024 * 1024; // ~6 MiB ciphertext cap (chars)
+const MAX_PLAINTEXT_BYTES = 4 * 1024 * 1024;
+// Base64 expansion plus salt, nonce, tag and separators.
+const MAX_CIPHERTEXT_LENGTH = 4 * Math.ceil(MAX_PLAINTEXT_BYTES / 3) + 71;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -120,9 +112,13 @@ async function deriveEncryptionKey(passwordStr, rulePhraseStr, pathStr, randomSa
   }
   argonSalt.fill(0);
 
-  // HKDF for key separation/domain separation (room for future subkeys, e.g. "auth:v1")
-  const hkdfKey = await crypto.subtle.importKey("raw", masterKey, { name: "HKDF" }, false, ["deriveBits"]);
-  masterKey.fill(0);
+  // HKDF for key separation/domain separation.
+  let hkdfKey;
+  try {
+    hkdfKey = await crypto.subtle.importKey("raw", masterKey, { name: "HKDF" }, false, ["deriveBits"]);
+  } finally {
+    masterKey.fill(0);
+  }
   const bits = await crypto.subtle.deriveBits(
     { name: "HKDF", hash: "SHA-256", salt: randomSalt, info: textEncoder.encode(HKDF_INFO) },
     hkdfKey,
@@ -132,7 +128,7 @@ async function deriveEncryptionKey(passwordStr, rulePhraseStr, pathStr, randomSa
 }
 
 // --- encryption (single-layer ChaCha20-Poly1305) ---
-async function encryptString(plaintextStr, passwordStr, rulePhraseStr, pathStr) {
+async function encryptString(plaintextStr, passwordStr, rulePhraseStr, pathStr, requestId) {
   const sodium = await sodiumReadyPromise;
   if (!sodium) throw new Error("Sodium.js not initialized for encryption.");
 
@@ -143,6 +139,7 @@ async function encryptString(plaintextStr, passwordStr, rulePhraseStr, pathStr) 
   self.postMessage({
     status: "progress",
     action: "encrypt",
+    requestId,
     currentStep: 1,
     totalSteps: 2,
     stepName: "Deriving key (Argon2id)",
@@ -152,6 +149,7 @@ async function encryptString(plaintextStr, passwordStr, rulePhraseStr, pathStr) 
   self.postMessage({
     status: "progress",
     action: "encrypt",
+    requestId,
     currentStep: 2,
     totalSteps: 2,
     stepName: "Encrypting (ChaCha20-Poly1305)",
@@ -185,25 +183,26 @@ async function encryptString(plaintextStr, passwordStr, rulePhraseStr, pathStr) 
 function parseCiphertext(ciphertextStr) {
   if (typeof ciphertextStr !== "string" || !ciphertextStr.startsWith(FORMAT_PREFIX)) {
     throw new Error(
-      "Unrecognized ciphertext format: not this app's v1 (WE1.) format. Old multi-layer ciphertexts are incompatible and must be decrypted with the old version first.",
+      "Unrecognized ciphertext format: expected WE2.<salt>.<iv>.<ct>.<mac>.",
     );
   }
   const parts = ciphertextStr.slice(FORMAT_PREFIX.length).split(".");
   if (parts.length !== 4) {
-    throw new Error("Malformed ciphertext: expected WE1.<salt>.<iv>.<ct>.<mac> with 4 fields.");
+    throw new Error("Malformed ciphertext: expected WE2.<salt>.<iv>.<ct>.<mac> with 4 fields.");
   }
   const salt = base64ToUint8Array(parts[0]);
   const iv = base64ToUint8Array(parts[1]);
   const ct = base64ToUint8Array(parts[2]);
   const mac = base64ToUint8Array(parts[3]);
-  if (salt.length !== SALT_LENGTH || iv.length !== IV_LENGTH || mac.length !== TAG_LENGTH || ct.length === 0) {
+  if (salt.length !== SALT_LENGTH || iv.length !== IV_LENGTH || mac.length !== TAG_LENGTH ||
+      ct.length === 0 || ct.length > MAX_PLAINTEXT_BYTES) {
     throw new Error("Malformed ciphertext: invalid field lengths.");
   }
   return { salt, iv, ct, mac };
 }
 
 // --- decryption (single-layer ChaCha20-Poly1305) ---
-async function decryptString(ciphertextStr, passwordStr, rulePhraseStr, pathStr) {
+async function decryptString(ciphertextStr, passwordStr, rulePhraseStr, pathStr, requestId, action = "decrypt") {
   const sodium = await sodiumReadyPromise;
   if (!sodium) throw new Error("Sodium.js not initialized for decryption.");
 
@@ -211,7 +210,8 @@ async function decryptString(ciphertextStr, passwordStr, rulePhraseStr, pathStr)
 
   self.postMessage({
     status: "progress",
-    action: "decrypt",
+    action,
+    requestId,
     currentStep: 1,
     totalSteps: 2,
     stepName: "Deriving key (Argon2id)",
@@ -220,32 +220,32 @@ async function decryptString(ciphertextStr, passwordStr, rulePhraseStr, pathStr)
 
   self.postMessage({
     status: "progress",
-    action: "decrypt",
+    action,
+    requestId,
     currentStep: 2,
     totalSteps: 2,
     stepName: "Decrypting (ChaCha20-Poly1305)",
   });
-  const plaintext = sodium.crypto_aead_chacha20poly1305_ietf_decrypt_detached(
-    null, // nsec unused
-    ct,
-    mac,
-    AAD,
-    iv,
-    key,
-  );
-  key.fill(0);
-
-  if (plaintext === null) {
-    throw new Error("Decryption failed: password, pattern or grid does not match, or the ciphertext was tampered with.");
+  let plaintext;
+  try {
+    plaintext = sodium.crypto_aead_chacha20poly1305_ietf_decrypt_detached(
+      null, ct, mac, AAD, iv, key,
+    );
+    if (plaintext === null) throw new Error('Authentication failed');
+  } catch (err) {
+    throw new Error('Password, pattern or grid does not match, or the ciphertext was damaged.');
+  } finally {
+    key.fill(0);
   }
   return textDecoder.decode(plaintext);
 }
 
 // --- worker message entry ---
-self.onmessage = async (e) => {
+async function handleMessage(e) {
   let responsePayload;
   const data = e.data || {};
   const action = data.action;
+  const requestId = data.requestId;
   const plaintext = data.plaintext;
   const ciphertext = data.ciphertext;
   const password = data.password;
@@ -258,18 +258,28 @@ self.onmessage = async (e) => {
     const sodium = await sodiumReadyPromise;
     if (!sodium) throw new Error("Sodium.js failed to initialize. Cannot perform crypto operations.");
 
+    if ((action === "encrypt" || action === "decrypt" || action === "verify") &&
+        (typeof rulePhrase !== 'string' || !/^[0-7]{1,64}$/.test(rulePhrase))) {
+      throw new Error('Draw a valid pattern.');
+    }
+    if (action === "encrypt" || action === "decrypt" || action === "verify") {
+      if (typeof password !== 'string' || typeof path !== 'string' ||
+          typeof (action === 'encrypt' ? plaintext : ciphertext) !== 'string') {
+        throw new Error('Data, password and grid must be strings.');
+      }
+    }
     if (action === "encrypt") {
       if (!plaintext || !password || !rulePhrase || !path) {
         throw new Error("Missing encryption parameters: plaintext, password, pattern and grid are all required.");
       }
-      if (plaintext.length > MAX_PLAINTEXT_LENGTH) {
-        throw new Error(`Plaintext too long: <= ${MAX_PLAINTEXT_LENGTH} characters.`);
+      if (plaintext.length > MAX_PLAINTEXT_BYTES || textEncoder.encode(plaintext).byteLength > MAX_PLAINTEXT_BYTES) {
+        throw new Error(`Plaintext too long: <= ${MAX_PLAINTEXT_BYTES} UTF-8 bytes (4 MiB).`);
       }
       if (password.length > MAX_PASSWORD_LENGTH || rulePhrase.length > MAX_RULE_LENGTH || path.length > MAX_PATH_LENGTH) {
         throw new Error(`Input too long: password <= ${MAX_PASSWORD_LENGTH}, pattern <= ${MAX_RULE_LENGTH}, grid <= ${MAX_PATH_LENGTH} characters.`);
       }
-      const result = await encryptString(plaintext, password, rulePhrase, path);
-      responsePayload = { status: "success", action, result };
+      const result = await encryptString(plaintext, password, rulePhrase, path, requestId);
+      responsePayload = { status: "success", action, requestId, result };
     } else if (action === "decrypt" || action === "verify") {
       if (!ciphertext || !password || !rulePhrase || !path) {
         throw new Error("Missing decryption parameters: ciphertext, password, pattern and grid are all required.");
@@ -280,17 +290,24 @@ self.onmessage = async (e) => {
       if (password.length > MAX_PASSWORD_LENGTH || rulePhrase.length > MAX_RULE_LENGTH || path.length > MAX_PATH_LENGTH) {
         throw new Error(`Input too long: password <= ${MAX_PASSWORD_LENGTH}, pattern <= ${MAX_RULE_LENGTH}, grid <= ${MAX_PATH_LENGTH} characters.`);
       }
-      const result = await decryptString(ciphertext, password, rulePhrase, path);
-      responsePayload = { status: "success", action, result };
+      const result = await decryptString(ciphertext, password, rulePhrase, path, requestId, action);
+      responsePayload = { status: "success", action, requestId, result };
     } else {
       throw new Error(`Unknown action: ${action}`);
     }
   } catch (err) {
     console.error(`Worker error during ${action || "unknown_action"}:`, err);
     const errorMessage = err && typeof err.message === "string" ? err.message : "An unknown error occurred in the worker.";
-    responsePayload = { status: "error", action: action || "unknown_action", error: errorMessage };
+    responsePayload = { status: "error", requestId, action: action || "unknown_action", error: errorMessage };
   }
   self.postMessage(responsePayload);
+}
+// Web Crypto awaits can yield: serialize requests to bound KDF memory and
+// keep progress/completion grouped even for direct Worker callers.
+let queue = Promise.resolve();
+self.onmessage = (e) => {
+  queue = queue.then(() => handleMessage(e));
+  return queue;
 };
 
 // --- base64 utilities (chunked: linear in size, avoids giant intermediate strings) ---

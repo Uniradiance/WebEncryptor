@@ -54,7 +54,7 @@ function makeEl(name) {
     fire(type, ev) {
       for (const h of (handlers[type] || [])) h(Object.assign({ preventDefault() {}, stopPropagation() {} }, ev));
     },
-    click() { this.fire('click', {}); },
+    click() { if (!this.disabled) this.fire('click', {}); },
     getBoundingClientRect() { return { left: 0, top: 0, width: 758, height: 195 }; },
     get clientWidth() { return 758; },
     getContext: () => makeCtx('off'),
@@ -70,7 +70,7 @@ globalThis.ResizeObserver = undefined;
 const flush = () => { while (state.rafQ.length) { const f = state.rafQ.shift(); f(); } };
 
 const { createSignaturePad } = await import(
-  pathToFileURL('/home/agent/WebEncryptor/htdocs/SignaturePad.js').href + '?replay=' + Date.now()
+  new URL('../htdocs/SignaturePad.js', import.meta.url).href + '?replay=' + Date.now()
 );
 
 function buildPad(opts = {}) {
@@ -85,6 +85,8 @@ function buildPad(opts = {}) {
     '.sigpad-undo': makeEl('undo'),
     '.sigpad-clear': makeEl('clear'),
     '.sigpad-confirm': makeEl('confirm'),
+    '.sigpad-verify': makeEl('verify'),
+    '.sigpad-cancel-verify': makeEl('cancelVerify'),
     '.sigpad-directions-toggle': makeEl('eye'),
   };
   const container = {
@@ -226,6 +228,37 @@ console.log('== T4: 引擎防御 (非有限/异常输入 -> EMPTY, 永不抛异�
   rec.addStroke([{ x: 0, y: 0 }, { x: 120, y: 0 }]);
   const rr = rec.result();
   check('T4 recognizer healthy after 50 poisoned strokes', rr.count === 1 && rr.sequence === 'R', rr.message);
+}
+
+// T5: verification compares segment codes, clears stale verification, and
+// keeps the first drawing private while the second is entered.
+console.log('== T5: 重画验证 ==');
+{
+  const { pad, canvas, els } = buildPad();
+  drawStroke(canvas, 20, 40, lineTo(20, 40, 140, 40));
+  const first = pad.getSequence();
+  check('T5 first drawing is not verified', !pad.isVerified());
+  els['.sigpad-verify'].click();
+  check('T5 verification clears first ink and blocks using partial redraw', pad.getSequence() === null && !pad.isVerified());
+  drawStroke(canvas, 20, 40, lineTo(20, 40, 20, 160));
+  els['.sigpad-verify'].click();
+  check('T5 different redraw cannot verify', !pad.isVerified() && pad.getSequence() === null);
+  els['.sigpad-clear'].click();
+  drawStroke(canvas, 50, 70, lineTo(50, 70, 220, 70));
+  els['.sigpad-verify'].click();
+  check('T5 translated/scaled matching redraw verifies', pad.isVerified() && pad.getSequence() === first && pad.isSigned());
+  drawStroke(canvas, 20, 40, lineTo(20, 40, 20, 160));
+  check('T5 verified pattern cannot be extended', pad.isVerified() && pad.getSequence() === first);
+  pad.setLocked(true);
+  pad.clear();
+  check('T5 locked clear cannot change verified factor', pad.isVerified() && pad.getSequence() === first);
+  pad.setLocked(false);
+  pad.clear();
+  check('T5 clear invalidates verification', !pad.isVerified() && pad.getSequence() === null);
+  drawStroke(canvas, 20, 40, lineTo(20, 40, 140, 40));
+  els['.sigpad-verify'].click();
+  els['.sigpad-cancel-verify'].click();
+  check('T5 cancellation discards both drawings', pad.getSequence() === null && !pad.isVerified());
 }
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,10 @@
+import { encodePattern } from './pattern_encoding.js';
+
 // SignaturePad.js — elongated hand-drawn pattern pad (factor C).
 //
 // Canvas -> multi-stroke accumulation -> 8-direction chain code recognition
 // (recognition_engine.js, Rust/WASM accelerated with a parity JS fallback) ->
-// direction-sequence string, fed to the crypto worker as rulePhrase.
+// direction-canonical segment codes, fed to the crypto worker as rulePhrase.
 //
 // Interaction:
 //   - Multiple pen-down strokes accumulate onto the same pattern (each stroke
@@ -42,12 +44,13 @@ export function createSignaturePad(container, options = {}) {
 
   container.innerHTML = `
         <div class="sigpad">
+            <p class="sigpad-help">Use the grid as a guide. Keep turns clear and legs long. Start markers show stroke order.</p>
             <div class="sigpad-stage">
                 <canvas class="sigpad-canvas"></canvas>
                 <div class="sigpad-stamp" hidden>SIGNED</div>
             </div>
             <div class="sigpad-toolbar">
-                <span class="sigpad-feedback">Draw your pattern on the pad.</span>
+                <span role="status" aria-live="polite" class="sigpad-feedback">Draw your pattern on the pad.</span>
                 <span class="sigpad-actions">
                     <button type="button" class="toggle-rule-button sigpad-directions-toggle" id="toggleRuleEncrypt" title="Always show stroke directions" aria-label="Always show stroke directions" aria-pressed="false">
                         <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -61,6 +64,8 @@ export function createSignaturePad(container, options = {}) {
                     <button type="button" class="sigpad-clear" title="Clear everything and redraw" aria-label="Clear everything and redraw">
                         <svg t="1787562970259" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="10510" width="32" height="32"><path d="M634.5728 118.1184l319.3856 320.0512a75.5712 75.5712 0 0 1 0 106.7008l-318.464 319.1296h308.48a32 32 0 0 1 4.7616 63.6416l-4.7616 0.3584H80.0256a32 32 0 0 1-4.7104-63.6416l4.7616-0.3584h231.6288l-209.8688-212.48a75.5712 75.5712 0 0 1 0.256-106.3936l426.0864-427.008a75.1616 75.1616 0 0 1 106.496 0zM282.112 455.2704L147.4048 590.336a11.5712 11.5712 0 0 0-1.8944 13.824l1.8432 2.4064 254.2592 257.3824h143.616l73.8816-74.0864L282.112 455.2704z" fill="#1D2129" p-id="10511"></path></svg>
                     </button>
+                    <button type="button" class="sigpad-verify" disabled>Redraw to verify</button>
+                    <button type="button" class="sigpad-cancel-verify" hidden>Cancel verification</button>
                     <button type="button" class="sigpad-confirm" title="Confirm: erase the ink and stamp the pad" disabled>Confirm</button>
                 </span>
             </div>
@@ -73,6 +78,8 @@ export function createSignaturePad(container, options = {}) {
   const undoBtn = container.querySelector(".sigpad-undo");
   const clearBtn = container.querySelector(".sigpad-clear");
   const confirmBtn = container.querySelector(".sigpad-confirm");
+  const verifyBtn = container.querySelector('.sigpad-verify');
+  const cancelVerifyBtn = container.querySelector('.sigpad-cancel-verify');
   const dirToggleBtn = container.querySelector(".sigpad-directions-toggle");
   const ctx = canvas.getContext("2d");
 
@@ -85,6 +92,9 @@ export function createSignaturePad(container, options = {}) {
   let feedbackMasked = false;
   let showDirections = false; // eye toggle: keep stroke-direction arrows visible
   let hideTimer = null;
+  let locked = false;
+  let baseline = null;
+  let verifiedCode = null;
 
   // Offscreen canvas holding the committed strokes (redraw cache)
   const offscreen = document.createElement("canvas");
@@ -112,7 +122,7 @@ export function createSignaturePad(container, options = {}) {
     redraw();
   };
 
-  const drawPolyline = (c, pts) => {
+  const drawPolyline = (c, pts, strokeNumber) => {
     if (!pts || pts.length < 2) return;
     c.beginPath();
     c.moveTo(pts[0].x, pts[0].y);
@@ -122,6 +132,15 @@ export function createSignaturePad(container, options = {}) {
     c.lineCap = "round";
     c.lineJoin = "round";
     c.stroke();
+    c.beginPath();
+    c.arc(pts[0].x, pts[0].y, 9, 0, Math.PI * 2);
+    c.fillStyle = '#15803d';
+    c.fill();
+    c.fillStyle = '#fff';
+    c.font = '12px sans-serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(String(strokeNumber), pts[0].x, pts[0].y);
   };
 
   // Small filled arrowheads every `spacing` px along the polyline, pointing in
@@ -165,8 +184,9 @@ export function createSignaturePad(container, options = {}) {
   // the eye toggle is on). Keeps per-frame redraws a cheap blit.
   const renderOffscreen = () => {
     offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
-    for (const s of strokes) {
-      drawPolyline(offCtx, s);
+    for (let i = 0; i < strokes.length; i++) {
+      const s = strokes[i];
+      drawPolyline(offCtx, s, i + 1);
       if (showDirections) drawDirectionArrows(offCtx, s);
     }
   };
@@ -182,7 +202,7 @@ export function createSignaturePad(container, options = {}) {
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (!signed) {
-      if (current) drawPolyline(ctx, current);
+      if (current) drawPolyline(ctx, current, strokes.length + 1);
       if (showDirections && current) drawDirectionArrows(ctx, current);
     }
   };
@@ -194,7 +214,15 @@ export function createSignaturePad(container, options = {}) {
 
   const updateFeedback = () => {
     const r = lastResult;
-    if (signed) {
+    if (baseline !== null) {
+      const matches = r && r.valid && encodePattern(r.segments) === baseline;
+      feedback.textContent = matches ? 'Redraw matches. Click Confirm match.' :
+        r && r.valid ? 'Pattern differs. Undo or clear and try again.' : 'Draw the same pattern again, in the same direction and order.';
+      feedback.className = matches ? 'sigpad-feedback ok' : 'sigpad-feedback';
+    } else if (verifiedCode !== null) {
+      feedback.textContent = 'Pattern verified. Ready to encrypt.';
+      feedback.className = 'sigpad-feedback ok';
+    } else if (signed) {
       feedback.textContent = MASKED_DOTS;
       feedback.className = "sigpad-feedback masked";
       feedbackMasked = false;
@@ -211,13 +239,18 @@ export function createSignaturePad(container, options = {}) {
       feedback.className = "sigpad-feedback err";
       feedbackMasked = false;
     }
-    undoBtn.disabled = signed || (strokes.length === 0 && !drawing);
-    clearBtn.disabled = false; // clear works even after confirm (equivalent to undoing it)
-    confirmBtn.disabled = !(r && r.valid && !signed);
+    undoBtn.disabled = locked || signed || (strokes.length === 0 && !drawing);
+    clearBtn.disabled = locked; // clear works even after confirm (equivalent to undoing it)
+    confirmBtn.disabled = locked || baseline !== null || !(r && r.valid && !signed) || drawing;
+    verifyBtn.disabled = locked || drawing || !(r && r.valid);
+    verifyBtn.textContent = baseline !== null ? 'Confirm match' : verifiedCode !== null ? 'Verify again' : 'Redraw to verify';
+    cancelVerifyBtn.hidden = baseline === null;
+    cancelVerifyBtn.disabled = locked;
   };
 
   const compute = () => {
     lastResult = rec.result(current);
+    if (!signed) verifiedCode = null;
     updateFeedback();
   };
 
@@ -275,7 +308,7 @@ export function createSignaturePad(container, options = {}) {
 
   canvas.addEventListener("pointerdown", (e) => {
     e.preventDefault();
-    if (drawing || signed) return;
+    if (locked || drawing || signed) return;
     revealFeedback();
     canvas.setPointerCapture(e.pointerId);
     drawing = true;
@@ -308,7 +341,7 @@ export function createSignaturePad(container, options = {}) {
       console.warn('signature pad: stroke commit failed; resyncing', err);
       resyncRec();
     }
-    drawPolyline(offCtx, s); // update the redraw cache once
+    drawPolyline(offCtx, s, strokes.length); // update the redraw cache once
     if (showDirections) drawDirectionArrows(offCtx, s);
     compute();
     scheduleHide();
@@ -317,7 +350,7 @@ export function createSignaturePad(container, options = {}) {
   canvas.addEventListener("pointercancel", endStroke);
 
   undoBtn.addEventListener("click", () => {
-    if (drawing || signed) return;
+    if (locked || drawing || signed) return;
     strokes.pop();
     resyncRec(); // 'strokes' is the source of truth: heals any prior drift
     renderOffscreen();
@@ -328,6 +361,8 @@ export function createSignaturePad(container, options = {}) {
   });
 
   clearBtn.addEventListener("click", () => {
+    if (locked) return;
+    verifiedCode = null;
     strokes = [];
     current = null;
     drawing = false;
@@ -346,7 +381,7 @@ export function createSignaturePad(container, options = {}) {
   // Confirm: erase the ink, stamp the pad (the sequence stays cached for use)
   confirmBtn.addEventListener("click", () => {
     const r = lastResult;
-    if (!r || !r.valid || signed) return;
+    if (locked || drawing || baseline !== null || !r || !r.valid || signed) return;
     signed = true;
     cancelHide();
     feedbackMasked = false;
@@ -357,6 +392,29 @@ export function createSignaturePad(container, options = {}) {
     redraw();
     stamp.hidden = false;
     updateFeedback();
+  });
+
+  verifyBtn.addEventListener('click', () => {
+    if (locked || drawing || !lastResult || !lastResult.valid) return;
+    const code = encodePattern(lastResult.segments);
+    if (baseline === null) {
+      baseline = code;
+      clearBtn.click();
+      updateFeedback();
+    } else if (code === baseline) {
+      verifiedCode = code;
+      baseline = null;
+      updateFeedback(); // enable the native Confirm button before clicking it
+      confirmBtn.click();
+      updateFeedback();
+    } else {
+      updateFeedback();
+    }
+  });
+  cancelVerifyBtn.addEventListener('click', () => {
+    if (locked) return;
+    baseline = null;
+    clearBtn.click();
   });
 
   // Eye toggle: always show stroke directions on the pad (no 5 s masking)
@@ -389,21 +447,33 @@ export function createSignaturePad(container, options = {}) {
   }
 
   return {
-    /** @returns {string|null} the direction sequence (e.g. "RURDLDRU") when valid */
+    /** @returns {string|null} the canonical WE2 factor (one digit per segment). */
     getSequence() {
-      return lastResult && lastResult.valid ? lastResult.sequence : null;
+      return !drawing && baseline === null && lastResult && lastResult.valid ? encodePattern(lastResult.segments) : null;
+    },
+    isVerified() {
+      return verifiedCode !== null && baseline === null && lastResult &&
+        lastResult.valid && verifiedCode === encodePattern(lastResult.segments);
+    },
+    setLocked(value) {
+      locked = value;
+      canvas.style.pointerEvents = value ? 'none' : '';
+      updateFeedback();
     },
     /** @returns {string} status description (for error messages) */
     getStatus() {
+      if (baseline !== null) return feedback.textContent;
       return lastResult ? lastResult.message : "Draw your pattern on the pad first.";
     },
     /** Clear the pad (including stamp and confirm state) */
     clear() {
+      if (locked) return;
+      baseline = null;
       clearBtn.click();
     },
     /** Whether a valid pattern has been recognized */
     isValid() {
-      return !!(lastResult && lastResult.valid);
+      return baseline === null && !drawing && !!(lastResult && lastResult.valid);
     },
     /** Whether the pattern has been confirmed (ink erased, pad stamped) */
     isSigned() {

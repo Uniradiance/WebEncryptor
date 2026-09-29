@@ -57,6 +57,13 @@
             </div>
         </section>
 
+            <div id="loadingIndicator" class="loading-indicator" style="display: none;">Initializing Worker...</div>
+            <div class="progress-bar-container" id="progressBarContainer" style="display: none;" aria-live="polite">
+                <div class="progress-bar" id="progressBar"></div>
+                <span class="progress-text" id="progressText"></span>
+            </div>
+            <div id="errorDisplay" class="error-message" role="alert" style="display: none;"></div>
+
         <!-- ============ Sub-tabs: Data Panel ⇄ Password Manager (the three
              factors above stay visible while switching) ============ -->
         <div class="tabs" role="tablist" aria-label="Sections">
@@ -163,12 +170,6 @@
                 </button>
             </div>
 
-            <div id="loadingIndicator" class="loading-indicator" style="display: none;">Initializing Worker...</div>
-            <div class="progress-bar-container" id="progressBarContainer" style="display: none;" aria-live="polite">
-                <div class="progress-bar" id="progressBar"></div>
-                <span class="progress-text" id="progressText"></span>
-            </div>
-            <div id="errorDisplay" class="error-message" style="display: none;"></div>
         </section>
         </div><!-- /#data -->
 

@@ -8,7 +8,10 @@
  * A service class to manage passwords by communicating with a backend API.
  * This encapsulates all logic for creating, reading, updating, and deleting passwords.
  */
-class PasswordService {
+export class PasswordService {
+    constructor({ timeoutMs = 30000 } = {}) {
+        this.timeoutMs = timeoutMs;
+    }
 
     /**
      * Server API access token (persisted in localStorage).
@@ -32,42 +35,78 @@ class PasswordService {
      * @returns {Promise<any>} The JSON response from the server.
      */
     async _fetch(url, options = {}, retried = false) {
+        const controller = new AbortController();
+        const callerSignal = options.signal;
+        const cancel = () => controller.abort(callerSignal.reason);
+        if (callerSignal?.aborted) cancel();
+        else callerSignal?.addEventListener('abort', cancel, { once: true });
+        let timer;
+        let unauthorized = false;
+        let result;
+        const deadline = new Promise((_, reject) => {
+            timer = setTimeout(() => {
+                controller.abort();
+                reject(new Error('The request timed out.'));
+            }, this.timeoutMs);
+        });
         try {
-            const response = await fetch(url, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    ...(this._getToken() ? { 'X-Auth-Token': this._getToken() } : {}),
-                },
-                ...options,
-            });
-
-            // 401: missing or invalid token -> ask for it once (persisted in localStorage)
-            if (response.status === 401 && !retried) {
-                const token = prompt('The server requires an access token (X-Auth-Token).\nThe token is shown in the server console when it starts; this browser will remember it after you enter it:');
-                if (token && token.trim()) {
-                    this._setToken(token);
-                    return this._fetch(url, options, true);
+            // The deadline covers both response headers and reading the body.
+            result = await Promise.race([deadline, (async () => {
+                const response = await fetch(url, {
+                    ...options,
+                    signal: controller.signal,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        ...options.headers,
+                        ...(this._getToken() ? { 'X-Auth-Token': this._getToken() } : {}),
+                    },
+                });
+                if (response.status === 401 && !retried) {
+                    unauthorized = true;
+                    return;
                 }
-                throw new Error('No access token provided; the API request was rejected (401). Check the server console for the --token value.');
-            }
-
-            if (!response.ok) {
-                const errorText = await response.text().catch(() => 'Could not read error response.');
-                throw new Error(`API request to ${url} failed with status ${response.status}: ${errorText}`);
-            }
-
-            // For methods like DELETE, the server might return a 204 No Content.
-            if (response.status === 204) {
-                return null;
-            }
-
-            return await response.json();
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`API request failed (${response.status}): ${errorText}`);
+                }
+                if (response.status === 204) return null;
+                return await response.json();
+            })()]);
         } catch (e) {
             console.error(`An error occurred in PasswordService during fetch to ${url}:`, e);
-            // Re-throw the error so the calling UI layer can handle it.
-            throw e;
+            const mutation = options.method && options.method !== 'GET';
+            throw new Error(`${e.message}${mutation ? ' The change may have reached the server. Refresh the list before retrying.' : ''}`);
+        } finally {
+            clearTimeout(timer);
+            callerSignal?.removeEventListener('abort', cancel);
         }
+        // User interaction and the authorized retry each get a fresh deadline.
+        if (unauthorized) {
+            const token = prompt('The server requires an access token (X-Auth-Token).\nEnter the token shown in the server console:');
+            if (token?.trim()) {
+                this._setToken(token);
+                return this._fetch(url, options, true);
+            }
+            throw new Error('No access token provided; the API request was rejected (401).');
+        }
+        return result;
+    }
+
+    _entryBody(data) {
+        const limits = { name: 4096, description: 65536, password: 4 * Math.ceil(4 * 1024 * 1024 / 3) + 71 };
+        const encoder = new TextEncoder();
+        for (const [field, value] of Object.entries(data)) {
+            if (!Object.hasOwn(limits, field) || typeof value !== 'string') throw new Error(`${field} must be a string field.`);
+            if (value.length > limits[field] || encoder.encode(value).byteLength > limits[field]) {
+                throw new Error(`${field} exceeds ${limits[field]} UTF-8 bytes.`);
+            }
+        }
+        const body = JSON.stringify(data);
+        if (encoder.encode(body).byteLength > 32 * 1024 * 1024) {
+            throw new Error('The JSON request exceeds 32 MiB.');
+        }
+        return body;
     }
 
     /**
@@ -86,7 +125,7 @@ class PasswordService {
     async addPassword(passwordData) {
         return this._fetch('/api/passwords', {
             method: 'POST',
-            body: JSON.stringify(passwordData),
+            body: this._entryBody(passwordData),
         });
     }
 
@@ -102,7 +141,7 @@ class PasswordService {
         }
         await this._fetch(`/api/passwords/${id}`, {
             method: 'PUT',
-            body: JSON.stringify(data),
+            body: this._entryBody(data),
         });
         return true; // If _fetch doesn't throw, it was successful.
     }

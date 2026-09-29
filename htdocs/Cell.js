@@ -4,10 +4,11 @@ import { COLOR_TO_STYLE_MAP, DEFAULT_CELL_STYLE, BORDER_COLOR_VALUE } from './co
 
 // Removed CellProps interface
 
-const Cell = ({ cellData, onInteractionStart, onPointerEnter }) => {
-  const cellStyleFromMap = cellData.color ? COLOR_TO_STYLE_MAP[cellData.color] : DEFAULT_CELL_STYLE;
+const Cell = ({ cellData, onInteractionStart, onPointerEnter, hidden = false, disabled = false, order }) => {
+  const cellStyleFromMap = !hidden && cellData.color ? COLOR_TO_STYLE_MAP[cellData.color] : DEFAULT_CELL_STYLE;
 
   const handleMouseDown = (event) => {
+    if (disabled) return;
     onInteractionStart(cellData.row, cellData.col, 'mouse');
   };
 
@@ -15,10 +16,12 @@ const Cell = ({ cellData, onInteractionStart, onPointerEnter }) => {
     // Prevent default to avoid synthetic mouse events and scrolling on touch devices.
     event.preventDefault();
     event.stopPropagation(); 
+    if (disabled) return;
     onInteractionStart(cellData.row, cellData.col, 'touch');
   };
 
   const handleMouseEnter = () => {
+    if (disabled) return;
     onPointerEnter(cellData.row, cellData.col, cellData.id);
   };
 
@@ -48,9 +51,10 @@ const Cell = ({ cellData, onInteractionStart, onPointerEnter }) => {
       'data-col': cellData.col,
       'data-cell': "true",
       role: "gridcell",
-      'aria-label': `Cell ${cellData.id}, Color: ${cellData.color || 'None'}`,
+      'aria-label': hidden ? `Cell ${cellData.id}, hidden` : `Cell ${cellData.id}, Color: ${cellData.color || 'None'}, Order: ${order || 'none'}`,
+      'aria-disabled': disabled,
       id: cellData.id
-    }, null /* No children for this div */
+    }, hidden ? '•' : (order || '')
     )
   );
 };

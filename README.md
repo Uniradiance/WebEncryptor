@@ -14,6 +14,18 @@
 
 **参数**（详见 `server.go`）：`--port`（默认 8443）、`--token`（API 令牌，强烈建议设置）、`--http`（纯 HTTP）、`--dir`（外部静态目录）、`--san/--days/--cn/--org`（证书）、`--no-browser`、`--debug`（写 server.log）。
 
+## 当前交互与可靠保存
+
+- 棋盘数字显示最终选中格子的实际顺序；撤销恢复上一次颜色和顺序，最多保留 256 次修改。提交后明确隐藏棋盘，点击 Show grid 可恢复显示，隐藏期间不能编辑。
+- 加密前点击 **Redraw to verify**，重新绘制并点击 **Confirm match**。不匹配可撤销或清空重试；取消验证会丢弃两次输入。解密只需输入图案，不要求重复验证。
+- 图案参考网格为 24px，绿色标记表示每笔起点；参考线和标记不参与识别。编码仍仅取方向，不要求落在同一位置。
+- 操作期间锁定因子、模式和保存入口；可切换 Data Panel/Manager，任务和进度保留。Worker 请求带编号并串行执行。
+- API 写入在同一互斥锁内完成：临时文件 → 文件 Sync → 原子替换 → Unix 目录 Sync，成功后才回复 2xx；Windows 同步文件并使用 Rename。写入失败返回 500，替换前失败不改变内存。目录同步或网络响应失败时结果可能不确定，先刷新列表再重试。
+- 损坏的密码库会让服务器停止启动，原文件保留，避免下一次保存覆盖它。
+- 明文按 UTF-8 字节限制为 4 MiB，密文上限为 5,592,479 字符，保存与解密使用同一容量限制。API 对超限请求返回 413，并拒绝错误类型与尾随 JSON。
+- 密码库采用 `{nextId,entries}` 对象格式，下一条 ID 与条目一起保存；删除后重启不复用 ID。
+- 网络请求默认 30 秒超时，失败保留密文和草稿并释放操作锁；管理页刷新保留编辑内容和焦点，过期响应不会覆盖最新列表。
+
 ## 加密规则
 1. **基础密码（Password）**：因子 A，主口令。
 2. **棋盘（Interactive Color Grid (Path)）**：因子 B，彩色棋盘上"点击顺序 + 颜色"构成路径字符串，必须完全一致。
@@ -43,14 +55,25 @@
 ### 测试
 ```bash
 node test/recognition_test.mjs     # 稳健性回归 + JS/WASM 精确一致性(parity) + 性能
+node test/business_state_test.mjs # 棋盘撤销、方向编码、任务互斥与过期响应
+node test/password_service_test.mjs # API 超时、取消、重试与容量校验
+node test/worker_smoke.js          # 新密文、错误因子、请求编号与串行 Worker
+go test -race ./...               # CRUD 落盘、失败回滚、损坏库、并发写入
 node test/sigpad_replay_test.mjs   # SignaturePad 状态一致性回归 (提交/撤销/异常注入/引擎防御)
 cargo test --manifest-path rust/recognition/Cargo.toml   # Rust 侧单元测试
 ```
+真实 Firefox 业务流程测试（Python 标准库，临时数据，不使用现有密码库）：
+```bash
+go build -o /tmp/webencryptor-business-server .
+python3 test/browser_flow.py --server /tmp/webencryptor-business-server
+```
+覆盖棋盘实际交互、隐藏、重画不匹配/重试、操作中切换、保存失败、重复提交、落盘、服务器重启和管理器解密。测试以真实 DOM 中的合成鼠标/指针事件运行，不覆盖触屏硬件与原生指针捕获。
+
 浏览器手动稳定性测试：打开 `htdocs/pad-tester.html`，连画 10 次看一致率（先热身 1~2 次）。
 
 ## 密文格式
-`WE1.<盐(16B,base64)>.<IV(12B,base64)>.<密文(base64)>.<MAC(16B,base64)>`，随机盐随密文存储。
-> ⚠️ `WE1.` 格式与旧版"多层 AES/ChaCha 套娃"密文**不兼容**；旧密文需用旧版程序解密后重新加密。旧多层方案已移除：它不增加安全性，只会让合法用户比攻击者多付 (层数+1) 倍 KDF 成本。
+`WE2.<盐(16B,base64)>.<IV(12B,base64)>.<密文(base64)>.<MAC(16B,base64)>`，随机盐随密文存储。
+> 图案因子每段编码一个数字：R/RU/U/LU/L/LD/D/RD → 0/1/2/3/4/5/6/7；因此 RU 与 R 后接 U 分别为 `1` 与 `02`。HKDF info 为 `WebEncryptor:enc:v2`，AAD 为 `WebEncryptor:v2`。
 
 ## 生成密码
 加密界面内置随机密码生成（8 / 14 / 18 位）。
@@ -90,14 +113,18 @@ Pipeline (pure-JS reference in `htdocs/signature_recognition.js` + a Rust/WASM c
 ### Tests
 ```bash
 node test/recognition_test.mjs                     # stability battery + JS/WASM exact parity + perf (seeds: --seeds=1,2,7; parity runs: --runs=1200)
-node test/worker_smoke.js                          # crypto round-trip smoke (needs `npm i --no-save libsodium-sumo`)
+node test/worker_smoke.js                          # crypto round-trip smoke (zero dependencies; tests shipped sodium.js)
 cargo test --manifest-path rust/recognition/Cargo.toml   # Rust unit tests
 ```
 Manual stability: open `htdocs/pad-tester.html`, draw 10+ times and check the consistency rate (warm up 1–2 times first).
 
 ## Ciphertext Format
-`WE1.<salt(16B,base64)>.<IV(12B,base64)>.<ciphertext(base64)>.<MAC(16B,base64)>`.
-> ⚠️ `WE1.` is **incompatible** with the old multi-layer AES/ChaCha format; decrypt old data with the old version first. The old layering was removed: it added no security while costing legitimate users (layers+1)× the KDF work.
+`WE2.<salt(16B,base64)>.<IV(12B,base64)>.<ciphertext(base64)>.<MAC(16B,base64)>`.
+> Each pattern segment is encoded as one digit: R/RU/U/LU/L/LD/D/RD → 0/1/2/3/4/5/6/7. RU is `1`, while R followed by U is `02`; HKDF info is `WebEncryptor:enc:v2` and AAD is `WebEncryptor:v2`.
+
+Plaintext is limited to 4 MiB of UTF-8 bytes; ciphertext is limited to 5,592,479 characters including format overhead. Decryption and saving use the same ciphertext limit. API requests have a 32 MiB JSON limit and reject invalid field types. Requests time out after 30 seconds; refresh the list before retrying an uncertain write. Manager refreshes retain unsaved drafts and ignore stale responses.
+
+The database persists `{nextId,entries}` so deleted IDs survive restarts.
 
 ## Password Generation
 The encryption panel includes random password generation (8 / 14 / 18 characters).

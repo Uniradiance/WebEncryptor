@@ -21,31 +21,60 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
     
-    // --- UI Rendering ---
-    const renderPasswords = async () => {
-        // A simple loader for better UX during network requests
-        passwordList.innerHTML = '<div class="pm-loader" style="text-align: center; color: #7f8c8d; grid-column: 1 / -1;">Loading passwords...</div>';
+    const cards = new Map();
+    let refreshSerial = 0;
+    const listStatus = document.createElement('p');
+    listStatus.setAttribute('role', 'status');
+    passwordList.before(listStatus);
 
+    // Keep drafts and pending mutations in their existing DOM nodes. Only the
+    // latest refresh can publish a result; errors leave current cards intact.
+    const renderPasswords = async () => {
+        const serial = ++refreshSerial;
+        listStatus.textContent = 'Loading passwords…';
+        passwordList.setAttribute('aria-busy', 'true');
         try {
             const passwords = await passwordService.getPasswords();
-            passwordList.innerHTML = ''; // Clear loader/old content
-
-            if (passwords.length === 0) {
-                const p = document.createElement('p');
-                p.textContent = 'No passwords saved. Click "Add New" to get started.';
-                p.style.textAlign = 'center';
-                p.style.color = '#7f8c8d';
-                p.style.gridColumn = "1 / -1"; // Span across all columns if grid is active
-                passwordList.appendChild(p);
-            } else {
-                passwords.forEach(password => {
-                    const card = createPasswordCard(password);
-                    passwordList.appendChild(card);
-                });
+            if (serial !== refreshSerial) return false;
+            const next = new Map();
+            for (const password of passwords) {
+                const card = cards.get(password.id);
+                next.set(password.id, card && (card.classList.contains('editing') || card.dataset.pending === 'true')
+                    ? card : createPasswordCard(password));
             }
+            let removedDraft = false;
+            for (const [id, card] of cards) {
+                if (!next.has(id) && (card.classList.contains('editing') || card.dataset.pending === 'true')) {
+                    next.set(id, card);
+                    removedDraft = true;
+                }
+            }
+            // Reconcile in place to preserve typing/focus when unrelated cards
+            // change. Snapshot current drafts at response time, not fetch time.
+            const keep = new Set(next.values());
+            for (const child of [...passwordList.children]) {
+                if (!keep.has(child)) child.remove();
+            }
+            let index = 0;
+            cards.clear();
+            for (const [id, card] of next) {
+                if (passwordList.children[index] !== card) {
+                    passwordList.insertBefore(card, passwordList.children[index] || null);
+                }
+                cards.set(id, card);
+                index++;
+            }
+            listStatus.textContent = removedDraft
+                ? 'An edited item is missing from the server. Your draft is retained; copy it before cancelling.'
+                : passwords.length ? '' : 'No passwords saved. Click "Add New" to get started.';
+            return true;
         } catch (error) {
+            if (serial !== refreshSerial) return false;
             console.error("Failed to load passwords:", error);
-            passwordList.innerHTML = '<p class="pm-error" style="text-align: center; color: #e74c3c; grid-column: 1 / -1;">Error: Could not fetch passwords from the server. Please check your connection and try again.</p>';
+            listStatus.textContent = `Could not refresh the list: ${error.message} Your edits are retained.`;
+            return false;
+        } finally {
+            if (serial === refreshSerial) passwordList.setAttribute('aria-busy', 'false');
         }
     };
 
@@ -77,11 +106,13 @@ document.addEventListener('DOMContentLoaded', () => {
         passwordInput.value = passwordData.password;
 
         const setCardBusy = (isBusy) => {
+            cardElement.dataset.pending = String(isBusy);
             editBtn.disabled = isBusy;
             saveBtn.disabled = isBusy;
             cancelBtn.disabled = isBusy;
             deleteBtn.disabled = isBusy;
-            useForDecryptBtn.disabled = isBusy;
+            useForDecryptBtn.disabled = isBusy || !!window.isCryptoBusy?.();
+            [nameInput, descriptionInput, passwordInput].forEach(input => { input.disabled = isBusy; });
             cardElement.style.opacity = isBusy ? '0.7' : '1';
         };
 
@@ -99,6 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Exit edit mode
             cardElement.classList.remove('editing');
             setUseForDecryptBtnState(useForDecryptBtn, false); // Back to normal mode: direct decrypt
+            renderPasswords();
         });
 
         saveBtn.addEventListener('click', async () => {
@@ -131,14 +163,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } catch (error) {
                 console.error("Failed to save password:", error);
-                alert("Failed to save the password. The item may have been deleted. The list will be refreshed.");
-                renderPasswords(); // Re-render to get latest state from server
+                alert(`Save was not confirmed: ${error.message} Your edits are retained.`);
             } finally {
                 setCardBusy(false);
+                renderPasswords();
             }
         });
         
+        useForDecryptBtn.disabled = !!window.isCryptoBusy?.();
         useForDecryptBtn.addEventListener('click', () => {
+            if (cardElement.dataset.pending === 'true' || window.isCryptoBusy?.()) return;
             const ciphertextInput = document.getElementById('ciphertextInput');
 
             if (cardElement.classList.contains('editing')) {
@@ -146,7 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // the Data Panel sub-tab + decrypt mode, then scroll to it).
                 if (ciphertextInput && window.switchToTab && window.scrollToSection && window.switchCryptoMode) {
                     // 1. Set the value
-                    ciphertextInput.value = passwordData.password;
+                    ciphertextInput.value = passwordInput.value;
 
                     // 2. Switch to the decryption input card (mutually exclusive mode)
                     window.switchCryptoMode('decrypt');
@@ -204,12 +238,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 setCardBusy(true);
                 try {
                     if(await passwordService.deletePassword(passwordData.id)) {
-                        // The card will be removed by renderPasswords, so we don't need to call setCardBusy(false)
-                        renderPasswords(); // Re-render the whole list
+                        cards.delete(passwordData.id);
+                        cardElement.remove();
                     }
                 } catch (error) {
                     console.error("Failed to delete password:", error);
-                    alert("Failed to delete the password. The list will be refreshed.");
+                    alert(`Delete was not confirmed: ${error.message}`);
+                } finally {
                     setCardBusy(false);
                     renderPasswords();
                 }
@@ -230,21 +265,18 @@ document.addEventListener('DOMContentLoaded', () => {
         
         try {
             const newPasswordEntry = await passwordService.addPassword(newPasswordData);
+            const newCard = createPasswordCard(newPasswordEntry);
+            cards.set(newPasswordEntry.id, newCard);
+            passwordList.appendChild(newCard);
+            newCard.classList.add('editing');
+            setUseForDecryptBtnState(newCard.querySelector('.use-for-decrypt-btn'), true);
+            newCard.querySelector('[data-name-input]').focus();
+            newCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
             await renderPasswords();
-
-            // Automatically enter edit mode for the new card for a better UX
-            setTimeout(() => {
-                const newCard = passwordList.querySelector(`[data-id='${newPasswordEntry.id}']`);
-                if (newCard) {
-                    newCard.classList.add('editing');
-                    setUseForDecryptBtnState(newCard.querySelector('.use-for-decrypt-btn'), true);
-                    newCard.querySelector('[data-name-input]').focus();
-                    newCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-            }, 100);
         } catch (error) {
             console.error("Failed to add new password:", error);
-            alert("Failed to add the new item. Please try again.");
+            alert(`Add was not confirmed: ${error.message}`);
+            renderPasswords();
         } finally {
             addPasswordBtn.disabled = false;
         }
