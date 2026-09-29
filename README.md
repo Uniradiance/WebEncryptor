@@ -1,4 +1,4 @@
-# WebEncryptor — Web-Based Text Encryption with Password Management
+# WebEncryptor — Password Vaults and Text Encryption
 
 **三因子密钥派生 + 单层 AEAD**：主口令、棋盘路径、手绘图案链码三个因子拼入 KDF 盐，经 **Argon2id**（内存困难型 KDF，3 轮 / 256 MiB）派生主密钥，再经 HKDF-SHA256 分离出加密密钥，最后用 **ChaCha20-Poly1305**（单层）加密。安全性取决于三因子组合熵 + Argon2id 的成本，密文可以公开存放。
 
@@ -15,6 +15,10 @@
 **参数**（详见 `server.go`）：`--port`（默认 8443）、`--token`（API 令牌，强烈建议设置）、`--http`（纯 HTTP）、`--dir`（外部静态目录）、`--san/--days/--cn/--org`（证书）、`--no-browser`、`--debug`（写 server.log）。
 
 ## 当前交互与可靠保存
+
+默认页面为 **Password Vaults**：一次三因子解锁后管理一组账号，支持自动锁定、搜索、编辑、复制、旧密文导入和加密备份恢复。**Text Encryption** 与 **Independent Items** 保留独立加解密及原条目。`passwords.json` 的 `{nextId,entries}` 外层结构不变，新增 `type: "vault"` 条目，其 `password` 保存加密后的随机库密钥，`children` 保存账号资料密文；版本检查阻止并发覆盖。格式、兼容性与验证见 [密码库设计与使用](docs/PASSWORD_VAULTS.md)。
+
+界面采用桌面侧边导航、手机顶部导航。三因子输入区随当前任务显示在新建／解锁、修改凭据、导入或文本加密区域内，切换页面保留输入状态。独立条目页默认折叠解密凭据，点击条目的解密按钮会展开；桌面使用上下方向键切换导航，手机使用左右方向键。
 
 - 棋盘保留外侧行列坐标，格内仅显示颜色；选择顺序用于密钥派生，撤销恢复上一次颜色和顺序，最多保留 256 次修改。提交后明确隐藏棋盘，点击 Show grid 可恢复显示，隐藏期间不能编辑。
 - 加密前点击 **Redraw to verify**，重新绘制并点击 **Confirm match**。不匹配可撤销或清空重试；取消验证会丢弃两次输入。解密只需输入图案，不要求重复验证。
@@ -60,6 +64,7 @@ node test/password_service_test.mjs # API 超时、取消、重试与容量校�
 node test/worker_smoke.js          # 新密文、错误因子、请求编号与串行 Worker
 go test -race ./...               # CRUD 落盘、失败回滚、损坏库、并发写入
 node test/sigpad_replay_test.mjs   # SignaturePad 状态一致性回归 (提交/撤销/异常注入/引擎防御)
+node test/direction_assist_test.mjs # 八方向软吸附、自由锥区、转弯释放与采样一致性
 cargo test --manifest-path rust/recognition/Cargo.toml   # Rust 侧单元测试
 ```
 真实 Firefox 业务流程测试（Python 标准库，临时数据，不使用现有密码库）：

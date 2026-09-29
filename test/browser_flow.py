@@ -109,6 +109,7 @@ window.flow = {
 };
 await flow.wait(() => window.reactAppRef?.current && !document.getElementById('actionButton').disabled, 'app did not initialize');
 localStorage.setItem('webencryptor_token', 'browser-test-token');
+switchToTab('data'); await flow.frame();
 """
 
 
@@ -135,7 +136,7 @@ def main():
         env = os.environ.copy()
         env["MOZ_DISABLE_CONTENT_SANDBOX"] = "1"
         browser = subprocess.Popen([
-            "firefox", "--headless", "--marionette", "--no-remote", "--profile", str(profile), "about:blank",
+            "firefox", "--headless", "--marionette", "--remote-allow-system-access", "--no-remote", "--profile", str(profile), "about:blank",
         ], stdout=log, stderr=log, env=env)
         server = None
         client = None
@@ -166,8 +167,12 @@ def main():
                     time.sleep(0.1)
             if client is None:
                 raise RuntimeError("Firefox did not start: " + (work / "processes.log").read_text())
+            client.call("WebDriver:Navigate", {"url": base + "/pad-tester.html"})
+            client.js("localStorage.setItem('webencryptor_token', 'browser-test-token');")
             client.call("WebDriver:Navigate", {"url": base + "/index.html"})
             client.js(HELPERS)
+            from workspace_browser_scenarios import exercise_workspace
+            exercise_workspace(client)
             client.js(r"""
                 await flow.cell('A0'); await flow.cell('B0'); await flow.cell('A0');
                 flow.check(reactAppRef.current.getFullData() === 'REDB0GREENA0', 'grid color/order incorrect');
@@ -358,6 +363,9 @@ def main():
                 return true;
             """)
             print("PASS: server restart + re-enter factors + Manager decrypt returns original Unicode plaintext", flush=True)
+            from vault_browser_scenarios import exercise_vaults
+            exercise_vaults(client, database)
+            client.js("switchToTab('data'); await flow.frame();")
             client.call("WebDriver:SetWindowRect", {"width": 390, "height": 844})
             client.js(r"""
                 await flow.frame();

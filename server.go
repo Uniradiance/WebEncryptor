@@ -53,10 +53,14 @@ var embeddedFS embed.FS
 
 // PasswordEntry is one password record persisted in passwords.json.
 type PasswordEntry struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Password    string `json:"password"`
+	ID          int          `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Password    string       `json:"password"`
+	Type        string       `json:"type,omitempty"`
+	VaultID     string       `json:"vaultId,omitempty"`
+	Revision    uint64       `json:"revision,omitempty"`
+	Children    []VaultChild `json:"children,omitempty"`
 }
 
 // Base64 expansion of 4 MiB UTF-8 plaintext plus salt, nonce, tag and separators.
@@ -107,7 +111,17 @@ func (s *server) loadDB() error {
 	}
 	entries, nextID := stored.Entries, stored.NextID
 	seen := make(map[int]bool, len(entries))
+	vaultIDs := make(map[string]bool)
 	for _, p := range entries {
+		if err := validateStoredEntry(p); err != nil {
+			return fmt.Errorf("invalid record %d (original file preserved): %w", p.ID, err)
+		}
+		if p.Type == "vault" {
+			if vaultIDs[p.VaultID] {
+				return errors.New("duplicate vault identifier (original file preserved)")
+			}
+			vaultIDs[p.VaultID] = true
+		}
 		if p.ID < 1 || p.ID == int(^uint(0)>>1) || uint64(p.ID) >= 1<<53 || seen[p.ID] {
 			return fmt.Errorf("invalid or duplicate database ID %d (original file preserved)", p.ID)
 		}
@@ -198,6 +212,9 @@ func methodNotAllowed(w http.ResponseWriter) {
 
 type passwordUpdate struct {
 	Name, Description, Password *string
+	Type, VaultID               *string
+	Revision                    *uint64
+	Children                    *[]VaultChild
 }
 
 // Read the entire bounded body: reject trailing JSON and oversized requests
@@ -223,6 +240,32 @@ func decodePasswordUpdate(w http.ResponseWriter, r *http.Request) (passwordUpdat
 		var target **string
 		var limit int
 		switch field {
+		case "revision":
+			var value uint64
+			if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, &value) != nil || value >= 1<<53 {
+				writeJSON(w, 400, map[string]string{"error": "revision must be a safe non-negative integer."})
+				return update, false
+			}
+			update.Revision = &value
+			continue
+		case "children":
+			var value []VaultChild
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.DisallowUnknownFields()
+			if decoder.Decode(&value) != nil || value == nil {
+				writeJSON(w, 400, map[string]string{"error": "children must be an array of encrypted items without nested children."})
+				return update, false
+			}
+			if err := validateChildren(value); err != nil {
+				writeJSON(w, 400, map[string]string{"error": err.Error()})
+				return update, false
+			}
+			update.Children = &value
+			continue
+		case "type":
+			target, limit = &update.Type, 16
+		case "vaultId":
+			target, limit = &update.VaultID, 36
 		case "name":
 			target, limit = &update.Name, maxNameBytes
 		case "description":
@@ -326,7 +369,7 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, X-Auth-Token")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, X-Auth-Token, If-Match")
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
@@ -345,8 +388,7 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			s.mu.Lock()
-			list := make([]PasswordEntry, len(s.db))
-			copy(list, s.db)
+			list := cloneEntries(s.db)
 			s.mu.Unlock()
 			writeJSON(w, http.StatusOK, list)
 		case http.MethodPost:
@@ -369,6 +411,11 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			if body.Password != nil {
 				entry.Password = *body.Password
+			}
+			if err := createVaultFields(&entry, body, s.db); err != nil {
+				s.mu.Unlock()
+				writeJSON(w, 400, map[string]string{"error": err.Error()})
+				return
 			}
 			next := append(append([]PasswordEntry{}, s.db...), entry)
 			err := s.commitDB(next)
@@ -395,7 +442,7 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.mu.Lock()
-			next := append([]PasswordEntry{}, s.db...)
+			next := cloneEntries(s.db)
 			var target *PasswordEntry
 			for i := range next {
 				if next[i].ID == id {
@@ -406,6 +453,15 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 			if target == nil {
 				s.mu.Unlock()
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("Password with id %d not found.", id)})
+				return
+			}
+			if err := updateVaultFields(target, body); err != nil {
+				s.mu.Unlock()
+				status := 400
+				if errors.Is(err, errVaultConflict) {
+					status = 409
+				}
+				writeJSON(w, status, map[string]string{"error": err.Error()})
 				return
 			}
 			if body.Name != nil {
@@ -427,6 +483,13 @@ func (s *server) apiHandler(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, updated)
 		case http.MethodDelete:
 			s.mu.Lock()
+			for _, p := range s.db {
+				if p.ID == id && p.Type == "vault" && r.Header.Get("If-Match") != fmt.Sprintf("\"%d\"", p.Revision) {
+					s.mu.Unlock()
+					writeJSON(w, 409, map[string]string{"error": errVaultConflict.Error()})
+					return
+				}
+			}
 			before := len(s.db)
 			filtered := make([]PasswordEntry, 0, len(s.db))
 			for _, p := range s.db {

@@ -8,6 +8,8 @@
  * A service class to manage passwords by communicating with a backend API.
  * This encapsulates all logic for creating, reading, updating, and deleting passwords.
  */
+import { validateVault, vaultBody } from './vault_schema.js';
+
 export class PasswordService {
     constructor({ timeoutMs = 30000 } = {}) {
         this.timeoutMs = timeoutMs;
@@ -68,7 +70,9 @@ export class PasswordService {
                 }
                 if (!response.ok) {
                     const errorText = await response.text();
-                    throw new Error(`API request failed (${response.status}): ${errorText}`);
+                    const error = new Error(`API request failed (${response.status}): ${errorText}`);
+                    error.status = response.status;
+                    throw error;
                 }
                 if (response.status === 204) return null;
                 return await response.json();
@@ -76,7 +80,9 @@ export class PasswordService {
         } catch (e) {
             console.error(`An error occurred in PasswordService during fetch to ${url}:`, e);
             const mutation = options.method && options.method !== 'GET';
-            throw new Error(`${e.message}${mutation ? ' The change may have reached the server. Refresh the list before retrying.' : ''}`);
+            const error = new Error(`${e.message}${mutation && (!e.status || e.status >= 500) ? ' The change may have reached the server. Refresh the list before retrying.' : ''}`);
+            error.status = e.status;
+            throw error;
         } finally {
             clearTimeout(timer);
             callerSignal?.removeEventListener('abort', cancel);
@@ -94,6 +100,7 @@ export class PasswordService {
     }
 
     _entryBody(data) {
+        if (data.type === 'vault') return JSON.stringify(validateVault(data));
         const limits = { name: 4096, description: 65536, password: 4 * Math.ceil(4 * 1024 * 1024 / 3) + 71 };
         const encoder = new TextEncoder();
         for (const [field, value] of Object.entries(data)) {
@@ -156,6 +163,18 @@ export class PasswordService {
             method: 'DELETE',
         });
         return true; // If _fetch doesn't throw, it was successful.
+    }
+
+    async saveVault(vault) {
+        return this._fetch(vault.id ? `/api/passwords/${vault.id}` : '/api/passwords', {
+            method: vault.id ? 'PUT' : 'POST', body: this._entryBody(vaultBody(vault)),
+        });
+    }
+
+    async deleteVault(vault) {
+        return this._fetch(`/api/passwords/${vault.id}`, { method: 'DELETE',
+            headers: { 'If-Match': `"${vault.revision}"` },
+        });
     }
 
     /**

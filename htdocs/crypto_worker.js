@@ -87,7 +87,7 @@ function buildSaltMaterial(rulePhraseStr, pathStr, randomSalt) {
 }
 
 // --- three factors -> encryption key ---
-async function deriveEncryptionKey(passwordStr, rulePhraseStr, pathStr, randomSalt) {
+async function deriveEncryptionKey(passwordStr, rulePhraseStr, pathStr, randomSalt, info = HKDF_INFO) {
   const sodium = await sodiumReadyPromise;
   if (!sodium) throw new Error("Sodium.js not initialized.");
 
@@ -120,7 +120,7 @@ async function deriveEncryptionKey(passwordStr, rulePhraseStr, pathStr, randomSa
     masterKey.fill(0);
   }
   const bits = await crypto.subtle.deriveBits(
-    { name: "HKDF", hash: "SHA-256", salt: randomSalt, info: textEncoder.encode(HKDF_INFO) },
+    { name: "HKDF", hash: "SHA-256", salt: randomSalt, info: textEncoder.encode(info) },
     hkdfKey,
     KEY_LENGTH * 8,
   );
@@ -268,7 +268,9 @@ async function handleMessage(e) {
         throw new Error('Data, password and grid must be strings.');
       }
     }
-    if (action === "encrypt") {
+    if (typeof action === 'string' && action.startsWith('vault_')) {
+      responsePayload = { status: 'success', action, requestId, result: await handleVaultAction(data) };
+    } else if (action === "encrypt") {
       if (!plaintext || !password || !rulePhrase || !path) {
         throw new Error("Missing encryption parameters: plaintext, password, pattern and grid are all required.");
       }
@@ -304,6 +306,7 @@ async function handleMessage(e) {
 }
 // Web Crypto awaits can yield: serialize requests to bound KDF memory and
 // keep progress/completion grouped even for direct Worker callers.
+importScripts('vault_crypto.js');
 let queue = Promise.resolve();
 self.onmessage = (e) => {
   queue = queue.then(() => handleMessage(e));

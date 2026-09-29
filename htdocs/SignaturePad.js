@@ -1,4 +1,5 @@
 import { encodePattern } from './pattern_encoding.js';
+import { createDirectionAssist } from './direction_assist.js';
 
 // SignaturePad.js — elongated hand-drawn pattern pad (factor C).
 //
@@ -88,12 +89,17 @@ export function createSignaturePad(container, options = {}) {
   let strokes = []; // committed strokes: Array<Array<{x,y}>> (kept in sync with rec)
   let current = null; // stroke in progress
   let drawing = false;
+  let assist = null;
+  let lastRaw = null;
+  let activePointer = null;
   let lastResult = null;
   let rafPending = false;
   let signed = false;
   let feedbackMasked = false;
   let showDirections = false; // eye toggle: keep stroke-direction arrows visible
   let hideTimer = null;
+  let markerTimer = null;
+  let markerVisible = false;
   let locked = false;
   let baseline = null;
   let verifiedCode = null;
@@ -124,7 +130,7 @@ export function createSignaturePad(container, options = {}) {
     redraw();
   };
 
-  const drawPolyline = (c, pts, strokeNumber) => {
+  const drawPolyline = (c, pts) => {
     if (!pts || pts.length < 2) return;
     c.beginPath();
     c.moveTo(pts[0].x, pts[0].y);
@@ -134,6 +140,11 @@ export function createSignaturePad(container, options = {}) {
     c.lineCap = "round";
     c.lineJoin = "round";
     c.stroke();
+  };
+
+  // Transient overlay, never baked into the committed ink cache.
+  const drawStartMarker = (c, pts, strokeNumber) => {
+    if (!pts || pts.length === 0) return;
     c.beginPath();
     c.arc(pts[0].x, pts[0].y, 9, 0, Math.PI * 2);
     c.fillStyle = '#15803d';
@@ -188,7 +199,7 @@ export function createSignaturePad(container, options = {}) {
     offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
     for (let i = 0; i < strokes.length; i++) {
       const s = strokes[i];
-      drawPolyline(offCtx, s, i + 1);
+      drawPolyline(offCtx, s);
       if (showDirections) drawDirectionArrows(offCtx, s);
     }
   };
@@ -204,9 +215,26 @@ export function createSignaturePad(container, options = {}) {
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (!signed) {
-      if (current) drawPolyline(ctx, current, strokes.length + 1);
+      if (current) drawPolyline(ctx, current);
       if (showDirections && current) drawDirectionArrows(ctx, current);
+      if (markerVisible) {
+        drawStartMarker(ctx, current || strokes.at(-1), current ? strokes.length + 1 : strokes.length);
+      }
     }
+  };
+
+  const cancelMarkerHide = () => {
+    if (markerTimer !== null) clearTimeout(markerTimer);
+    markerTimer = null;
+  };
+
+  const scheduleMarkerHide = () => {
+    cancelMarkerHide();
+    markerTimer = setTimeout(() => {
+      markerTimer = null;
+      markerVisible = false;
+      redraw();
+    }, HIDE_DELAY_MS);
   };
 
   const toCssPoint = (e) => {
@@ -314,24 +342,41 @@ export function createSignaturePad(container, options = {}) {
     revealFeedback();
     canvas.setPointerCapture(e.pointerId);
     drawing = true;
-    current = [toCssPoint(e)];
+    activePointer = e.pointerId;
+    lastRaw = toCssPoint(e);
+    assist = createDirectionAssist(lastRaw);
+    current = [lastRaw];
+    cancelMarkerHide();
+    markerVisible = true;
     redraw();
     updateFeedback();
   });
 
-  canvas.addEventListener("pointermove", (e) => {
-    if (!drawing || !current) return;
+  const appendPoint = (e, force = false) => {
     const p = toCssPoint(e);
-    const last = current[current.length - 1];
-    if (last && Math.hypot(p.x - last.x, p.y - last.y) < 1) return; // sub-pixel de-noise
-    current.push(p);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
+    const distance = Math.hypot(p.x - lastRaw.x, p.y - lastRaw.y);
+    if (distance === 0 || (!force && distance < 1)) return;
+    lastRaw = p;
+    current.push(assist.move(p));
+  };
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (!drawing || !current || e.pointerId !== activePointer) return;
+    const samples = e.getCoalescedEvents?.() || [];
+    for (const sample of samples) appendPoint(sample);
+    appendPoint(e);
     redraw();
     scheduleCompute();
   });
 
-  const endStroke = () => {
-    if (!drawing || !current) return;
+  const endStroke = (e) => {
+    if (!drawing || !current || e.pointerId !== activePointer) return;
+    if (e.type !== 'pointercancel') appendPoint(e, true);
     drawing = false;
+    assist = null;
+    lastRaw = null;
+    activePointer = null;
     const s = current; // capture; commit is all-or-nothing below
     current = null;
     strokes.push(s); // accumulate: the next stroke appends to the pattern
@@ -343,10 +388,12 @@ export function createSignaturePad(container, options = {}) {
       console.warn('signature pad: stroke commit failed; resyncing', err);
       resyncRec();
     }
-    drawPolyline(offCtx, s, strokes.length); // update the redraw cache once
+    drawPolyline(offCtx, s); // update the redraw cache once
     if (showDirections) drawDirectionArrows(offCtx, s);
+    redraw();
     compute();
     scheduleHide();
+    scheduleMarkerHide();
   };
   canvas.addEventListener("pointerup", endStroke);
   canvas.addEventListener("pointercancel", endStroke);
@@ -354,6 +401,8 @@ export function createSignaturePad(container, options = {}) {
   undoBtn.addEventListener("click", () => {
     if (locked || drawing || signed) return;
     strokes.pop();
+    markerVisible = strokes.length > 0;
+    scheduleMarkerHide();
     resyncRec(); // 'strokes' is the source of truth: heals any prior drift
     renderOffscreen();
     redraw();
@@ -368,10 +417,15 @@ export function createSignaturePad(container, options = {}) {
     strokes = [];
     current = null;
     drawing = false;
+    assist = null;
+    lastRaw = null;
+    activePointer = null;
     lastResult = null;
     signed = false;
     feedbackMasked = false;
     cancelHide();
+    cancelMarkerHide();
+    markerVisible = false;
     sigpadEl.classList.remove("signed");
     stamp.hidden = true;
     resyncRec(); // strokes is empty -> clears the recognition cache too
@@ -386,6 +440,8 @@ export function createSignaturePad(container, options = {}) {
     if (locked || drawing || baseline !== null || !r || !r.valid || signed) return;
     signed = true;
     cancelHide();
+    cancelMarkerHide();
+    markerVisible = false;
     feedbackMasked = false;
     strokes = []; // visually erase (rec cache keeps the sequence for getSequence)
     current = null;

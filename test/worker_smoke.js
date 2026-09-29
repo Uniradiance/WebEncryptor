@@ -19,8 +19,8 @@ const context = vm.createContext({
     self: { postMessage: m => messages.push(m) },
 });
 context.self.crypto = context.crypto;
-context.importScripts = () => vm.runInContext(
-    fs.readFileSync(path.join(REPO, 'htdocs', 'sodium.js'), 'utf8'), context);
+context.importScripts = (...names) => names.forEach(name => vm.runInContext(
+    fs.readFileSync(path.join(REPO, 'htdocs', name), 'utf8'), context));
 vm.runInContext(fs.readFileSync(path.join(REPO, 'htdocs', 'crypto_worker.js'), 'utf8'), context);
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));

@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
         listStatus.textContent = 'Loading passwords…';
         passwordList.setAttribute('aria-busy', 'true');
         try {
-            const passwords = await passwordService.getPasswords();
+            const passwords = (await passwordService.getPasswords()).filter(item => item.type !== 'vault');
             if (serial !== refreshSerial) return false;
             const next = new Map();
             for (const password of passwords) {
@@ -66,7 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             listStatus.textContent = removedDraft
                 ? 'An edited item is missing from the server. Your draft is retained; copy it before cancelling.'
-                : passwords.length ? '' : 'No passwords saved. Click "Add New" to get started.';
+                : passwords.length ? '' : 'No independent items yet. Choose “Add item” to save a ciphertext.';
             return true;
         } catch (error) {
             if (serial !== refreshSerial) return false;
@@ -201,10 +201,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         alert('Could not switch to decryption mode. The main script might have an issue.');
                     }
                     if (!window.switchToTab) {
-                        alert('Could not switch to the Data Panel tab. The main script might have an issue.');
+                        alert('Could not switch to the Text Encryption tab. The main script might have an issue.');
                     }
                     if (!window.scrollToSection) {
-                        alert('Could not scroll to the Data Panel. The main script might have an issue.');
+                        alert('Could not scroll to Text Encryption. The main script might have an issue.');
                     }
                 }
             } else {

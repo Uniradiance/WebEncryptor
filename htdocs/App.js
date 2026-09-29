@@ -210,6 +210,7 @@ const App = () => {
       getCells: () => [...cells],
       hide: () => setHidden(true),
       setLocked,
+      reset: () => { dispatchGrid({ type: 'reset' }); setHidden(false); },
     };
 
     return () => {

@@ -52,7 +52,7 @@ function makeEl(name) {
     addEventListener(type, fn) { (handlers[type] = handlers[type] || []).push(fn); },
     removeEventListener() {},
     fire(type, ev) {
-      for (const h of (handlers[type] || [])) h(Object.assign({ preventDefault() {}, stopPropagation() {} }, ev));
+      for (const h of (handlers[type] || [])) h(Object.assign({ type, preventDefault() {}, stopPropagation() {} }, ev));
     },
     click() { if (!this.disabled) this.fire('click', {}); },
     getBoundingClientRect() { return { left: 0, top: 0, width: 758, height: 195 }; },
@@ -259,6 +259,41 @@ console.log('== T5: 重画验证 ==');
   els['.sigpad-verify'].click();
   els['.sigpad-cancel-verify'].click();
   check('T5 cancellation discards both drawings', pad.getSequence() === null && !pad.isVerified());
+}
+
+// T6: corrected points reach recognition, coalesced samples and pen-up are
+// retained, other pointers are ignored, and assistance resets between strokes.
+console.log('== T6: 软吸附接入 ==');
+{
+  const committed = [];
+  const { pad, canvas } = buildPad({ recognizer(options) {
+    const real = ENG.createIncrementalRecognizer(options);
+    return { ...real, addStroke(points) {
+      committed.push(points.map(p => ({ ...p })));
+      return real.addStroke(points);
+    } };
+  } });
+  canvas.fire('pointerdown', { clientX: 0, clientY: 0, pointerId: 1 });
+  canvas.fire('pointermove', { clientX: 400, clientY: 100, pointerId: 2 });
+  canvas.fire('pointerup', { clientX: 400, clientY: 100, pointerId: 2 });
+  check('T6 other pointer cannot end the stroke', committed.length === 0);
+  canvas.fire('pointermove', {
+    clientX: 90, clientY: 18, pointerId: 1,
+    getCoalescedEvents: () => [10, 30, 60].map(x => ({ clientX: x, clientY: x * 0.2 })),
+  });
+  canvas.fire('pointerup', { clientX: 100, clientY: 20, pointerId: 1 });
+  flush();
+  const stroke = committed[0];
+  check('T6 coalesced samples and final point retained', stroke.length === 6 && stroke.at(-1).x === 100);
+  check('T6 recognition receives softly corrected ink', stroke.at(-1).y < 20 && stroke.at(-1).y >= 16);
+  drawStroke(canvas, 20, 40, lineTo(20, 40, 120, 40));
+  check('T6 next stroke starts with zero correction', committed[1].every(p => p.y === 40));
+  pad.clear();
+  canvas.fire('pointerdown', { clientX: 0, clientY: 0, pointerId: 1 });
+  canvas.fire('pointermove', { clientX: 80, clientY: 0, pointerId: 1 });
+  canvas.fire('pointercancel', { clientX: 0, clientY: 0, pointerId: 1 });
+  check('T6 cancellation does not append a spurious endpoint', committed.at(-1).at(-1).x === 80);
+  pad.clear();
 }
 
 // ---------------------------------------------------------------------------

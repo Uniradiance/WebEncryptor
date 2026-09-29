@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Encryptor</title>
+    <title>WebEncryptor · Your private workspace</title>
     <link rel="stylesheet" href="index.css">
     <link rel="manifest" href="manifest.json">
     <!-- Self-hosted React (vendored, fully offline; no CDN dependency) -->
@@ -21,16 +21,37 @@
 </head>
 
 <body>
+    <a class="skip-link" href="#workspace">Skip to workspace</a>
     <div class="container">
+        <aside class="sidebar" aria-label="Application navigation">
         <header class="page-header">
             <div class="brand">
                 <svg class="brand-mark" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="5" y="10" width="14" height="11" rx="2" />
                     <path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" />
                 </svg>
-                <div class="brand-text"><h1>Encryptor</h1><p>Text encryption &amp; password storage</p></div>
+                <div class="brand-text"><span class="brand-name">Encryptor<span class="brand-dot">.</span></span><p>A little more private.</p></div>
             </div>
-            <button id="moreOptionsButton" title="More Options" aria-label="More Options" aria-haspopup="true" aria-expanded="false"
+        </header>
+
+        <p class="nav-caption">WORKSPACE</p>
+        <nav class="tabs workspace-tabs" role="tablist" aria-label="Workspace" aria-orientation="vertical">
+            <button type="button" id="vaultTab" class="tab-button active" data-tab="vault" role="tab"
+                aria-controls="vault" aria-selected="true"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="3"/><circle cx="12" cy="11" r="3"/><path d="M12 8v6M9 11h6M8 18h8"/></svg><span>Password Vaults</span></button>
+            <button type="button" id="dataTab" class="tab-button" data-tab="data" role="tab"
+                aria-controls="data" aria-selected="false" tabindex="-1"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5"/></svg><span>Text Encryption</span></button>
+            <button type="button" id="managerTab" class="tab-button" data-tab="manager" role="tab"
+                aria-controls="manager" aria-selected="false" tabindex="-1"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="7" rx="2"/><rect x="14" y="4" width="7" height="7" rx="2"/><rect x="3" y="15" width="7" height="6" rx="2"/><path d="M14 16h7M14 20h5"/></svg><span>Independent Items</span></button>
+        </nav>
+        <div class="sidebar-note">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z"/><path d="m8 12 3 3 5-6"/></svg>
+            <strong>Three factors. One key.</strong>
+            <p>Your password, pattern and color grid work together.</p>
+        </div>
+        <span class="sidebar-footer">WebEncryptor · Private by design</span>
+        </aside>
+        <main class="workspace" id="workspace" tabindex="-1">
+            <div class="workspace-topbar"><span>YOUR PRIVATE WORKSPACE</span><div class="app-menu">            <button id="moreOptionsButton" title="More Options" aria-label="More Options" aria-haspopup="true" aria-expanded="false"
                 style="background-color: transparent; border: none; cursor: pointer; padding: 0.25rem; color: #6B7280; line-height: 0;">
                 <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
                     fill="currentColor">
@@ -42,62 +63,100 @@
             <div id="moreOptionsMenu" class="popup-menu" role="menu">
                 <button id="shutdownButton" class="popup-menu-item" role="menuitem">Shutdown</button>
             </div>
-        </header>
+</div></div>
+            <header class="workspace-heading">
+                <p class="eyebrow" id="workspaceEyebrow">ORGANIZE &amp; PROTECT</p>
+                <h1 id="workspaceTitle">Password vaults</h1>
+                <p id="workspaceDescription">All your accounts, behind one unlock.</p>
+            </header>
 
-        <!-- ============ Section 1: the three secret factors ============ -->
-        <section class="ui-section" id="secretFactors">
-            <div class="factors-layout">
-                <div class="factor-card factor-pattern">
-                    <div class="factor-header">
-                        <h3 id="signaturePatternLabel">Signature Pattern</h3>
-                        <details class="help-menu">
-                            <summary aria-label="Pattern instructions" title="Pattern instructions">?</summary>
-                            <div class="help-popover">
-                                <h4>Pattern instructions</h4>
-                                <p>Use the guide to draw clear turns and long strokes. Green dots mark the start of each stroke.</p>
-                                <p>Before encrypting, redraw the same pattern and confirm the match.</p>
-                            </div>
-                        </details>
-                    </div>
-                    <div id="signaturePadCrypto" role="group" aria-labelledby="signaturePatternLabel"></div>
+        <div id="vault" class="tab-content active" role="tabpanel" aria-labelledby="vaultTab">
+            <section class="ui-section vault-panel">
+                <div class="section-header">
+                    <div><h2>Your vaults</h2><p class="workspace-hint">Choose a vault to access your accounts.</p></div>
+                    <button type="button" class="pm-button" id="vault-new"><span aria-hidden="true">＋</span> New vault</button>
                 </div>
-                <div class="factor-card factor-grid">
-                    <div class="factor-header">
-                        <h3 id="colorGridLabel">Color Grid <span class="label-detail">/ Path</span></h3>
-                        <details class="help-menu" id="gridInstructions">
-                            <summary aria-label="Grid instructions" title="Grid instructions">?</summary>
-                            <div class="help-popover">
-                                <h4>Grid instructions</h4>
-                                <p>Click a cell to cycle its color: Default → Red → Green → Blue → Black → Default.</p>
-                                <p>Drag from a colored cell to paint with that color. Empty cells cannot start a drag.</p>
-                                <p>Your selection order is part of the secret. Recreate the same colors and order to decrypt.</p>
-                            </div>
-                        </details>
-                    </div>
-                    <div id="ChessboardEncrypt" role="group" aria-labelledby="colorGridLabel"></div>
+                <div class="vault-picker">
+                    <label for="vault-select">SELECT VAULT</label>
+                    <select id="vault-select"><option value="">Choose a vault</option></select>
+                    <button type="button" class="vault-button" id="vault-refresh">Refresh</button>
+                    <button type="button" class="vault-button" id="vault-restore">Restore backup</button>
+                    <input type="file" id="vault-restore-file" accept=".json,application/json" hidden aria-label="Encrypted vault backup">
                 </div>
-            </div>
-
-            <!-- Factor A follows the two factor cards: it reuses the card header strip,
-                 with the field sitting where the help menu sits on the cards above. -->
-            <div class="factors-heading">
-                <div class="factor-card factor-password">
-                    <div class="factor-header">
-                        <h3 id="passwordFactorLabel">Password</h3>
-                        <div class="password-body">
-                            <input type="password" id="passwordEncrypt" aria-labelledby="passwordFactorLabel" autocomplete="off">
+                <p id="vault-status" class="workspace-hint" role="status" aria-live="polite"></p>
+                <div id="vault-welcome" class="vault-empty">
+                    <div class="vault-empty-mark" aria-hidden="true"><svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="13" y="8" width="38" height="46" rx="7"/><rect x="19" y="14" width="26" height="34" rx="3"/><circle cx="32" cy="30" r="7"/><path d="M32 23v14M25 30h14M10 19h6M10 42h6M22 54v4M42 54v4"/></svg></div>
+                    <span class="eyebrow">A HOME FOR YOUR PASSWORDS</span>
+                    <h3>Keep your digital life together.</h3>
+                    <p>Save account details in an encrypted vault.<br>Unlock once with your three credentials, then make yourself at home.</p>
+                    <button type="button" class="pm-button" id="vault-welcome-create">Create your first vault <span aria-hidden="true">↗</span></button>
+                    <p class="empty-footnote">Already have a backup? Use Restore backup above.</p>
+                </div>
+                <form id="vault-access" hidden>
+                    <h3 id="vault-access-title">Unlock vault</h3>
+                    <div id="vault-create-fields" class="vault-form-grid" hidden>
+                        <label>Vault name<input id="vault-name" maxlength="256" autocomplete="off"></label>
+                        <label>Description<input id="vault-description" maxlength="1000" autocomplete="off"></label>
+                    </div>
+                    <p id="vault-access-hint" class="workspace-hint"></p>
+                    <div id="vault-access-factors"></div>
+                    <div class="vault-actions">
+                        <button type="submit" class="pm-button" id="vault-access-submit">Unlock</button>
+                        <button type="button" class="vault-button" id="vault-access-cancel">Cancel</button>
+                        <button type="button" class="vault-button danger" id="vault-delete-locked">Delete vault</button>
+                    </div>
+                </form>
+                <div id="vault-workspace" hidden>
+                    <div class="vault-toolbar">
+                        <div><h3 id="vault-title"></h3><span id="vault-count" class="workspace-hint"></span></div>
+                        <div class="vault-actions">
+                            <button type="button" class="vault-button" id="vault-backup">Encrypted backup</button>
+                            <button type="button" class="vault-button" id="vault-change">Change unlock</button>
+                            <button type="button" class="vault-button" id="vault-lock">Lock vault</button>
                         </div>
                     </div>
+                    <div class="vault-toolbar">
+                        <label class="vault-search">Search accounts<input type="search" id="vault-search" placeholder="Name, username or website" autocomplete="off"></label>
+                        <div class="vault-actions">
+                            <button type="button" class="vault-button" id="vault-import">Import independent item</button>
+                            <button type="button" class="pm-button" id="vault-add">＋ Add account</button>
+                        </div>
+                    </div>
+                    <p class="workspace-hint">Locks after 5 minutes of inactivity. Account details are encrypted together.</p>
+                    <div id="vault-accounts" class="vault-accounts"></div>
                 </div>
-                <!-- Workspace navigation: the three secret factors stay visible in both tabs. -->
-                <nav class="tabs" role="tablist" aria-label="Sections">
-                    <button type="button" id="dataTab" class="tab-button active" data-tab="data" role="tab"
-                        aria-controls="data" aria-selected="true">Data Panel</button>
-                    <button type="button" id="managerTab" class="tab-button" data-tab="manager" role="tab"
-                        aria-controls="manager" aria-selected="false" tabindex="-1">Password Manager</button>
-                </nav>
-            </div>
-        </section>
+                <form id="vault-editor" hidden>
+                    <h3 id="vault-editor-title">Add account</h3>
+                    <div class="vault-form-grid">
+                        <label>Name<input id="account-name" required maxlength="1024" autocomplete="off"></label>
+                        <label>Website<input id="account-url" maxlength="4096" autocomplete="off" placeholder="https://example.com"></label>
+                        <label>Username<input id="account-username" maxlength="4096" autocomplete="off"></label>
+                        <label>Password<span class="vault-password-field"><input type="password" id="account-password" maxlength="16384" autocomplete="new-password"><button type="button" id="account-reveal" class="vault-button" aria-pressed="false">Show</button></span></label>
+                    </div>
+                    <label>Notes<textarea id="account-notes" rows="3" maxlength="30000"></textarea></label>
+                    <div class="vault-actions">
+                        <button type="submit" class="pm-button" id="account-save">Save account</button>
+                        <button type="button" class="vault-button" id="account-generate">Generate password</button>
+                        <button type="button" class="vault-button" id="account-draft-copy">Copy draft</button>
+                        <button type="button" class="vault-button" id="account-cancel">Cancel</button>
+                    </div>
+                </form>
+                <form id="vault-import-form" hidden>
+                    <h3>Import independent ciphertext</h3>
+                    <p class="workspace-hint">Enter the item's original password, pattern and grid below. The original item is retained.</p>
+                    <label>Independent item<select id="vault-import-select"></select></label>
+                    <div id="vault-import-factors"></div>
+                    <div class="vault-actions"><button type="submit" class="pm-button">Decrypt and import</button><button type="button" class="vault-button" id="vault-import-cancel">Cancel</button></div>
+                </form>
+                <form id="vault-change-form" hidden>
+                    <h3>Change vault unlock</h3>
+                    <p class="workspace-hint">Set the new password, pattern and grid below. Redraw the pattern to verify it. Your account passwords stay the same.</p>
+                    <div class="vault-form-grid"><label>Vault name<input id="vault-change-name" required maxlength="256"></label><label>Description<input id="vault-change-description" maxlength="1000"></label></div>
+                    <div id="vault-change-factors"></div>
+                    <div class="vault-actions"><button type="submit" class="pm-button">Save unlock settings</button><button type="button" class="vault-button" id="vault-change-cancel">Cancel</button><button type="button" class="vault-button danger" id="vault-delete">Delete vault and accounts</button></div>
+                </form>
+            </section>
+        </div>
 
             <div id="loadingIndicator" class="loading-indicator" role="status" style="display: none;"></div>
             <div class="progress-bar-container" id="progressBarContainer" style="display: none;" aria-live="polite">
@@ -107,11 +166,12 @@
             <div id="errorDisplay" class="error-message" role="alert" style="display: none;"></div>
 
         <!-- ============ Tab: Data Panel (input + ciphertext output) ============ -->
-        <div id="data" class="tab-content active" role="tabpanel" aria-labelledby="dataTab">
+        <div id="data" class="tab-content" role="tabpanel" aria-labelledby="dataTab">
+        <div id="data-factors"></div>
         <!-- ============ Section 2: Data Panel (encrypt/decrypt input, freely switchable) ============ -->
         <section class="ui-section" id="dataPanel">
             <div class="section-header">
-                <h2>Input</h2>
+                <h2>Your text</h2>
                 <div class="mode-switch" role="group" aria-label="Operation mode">
                     <button type="button" class="mode-button active" data-mode="encrypt"
                         aria-pressed="true">Encrypt</button>
@@ -130,7 +190,7 @@
                             <button type="button" id="showGeneratePasswordModalButton" class="link-style-button" title="Generate a secure password">Generate password</button>
                         </div>
                         <div class="input-pane-body" style="position: relative;"> <!-- Wrapper for textarea and paste button -->
-                            <textarea id="plaintext" rows="5" aria-label="Data to encrypt"></textarea>
+                            <textarea id="plaintext" placeholder="Type or paste the text you want to protect…" rows="5" aria-label="Data to encrypt"></textarea>
                             <button id="pastePlaintextButton" title="Paste" aria-label="Paste into Data to Encrypt"
                                 style="position: absolute; bottom: 8px; right: 8px; background-color: transparent; border: none; padding: 0.375rem; cursor: pointer; color: #4B5563; border-radius: 0.25rem; line-height: 0; z-index: 5;">
                                 <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20"
@@ -179,7 +239,7 @@
             <!-- Output area (ciphertext after encrypt, plaintext after decrypt) -->
             <div class="output-card" role="region" aria-labelledby="cryptoOutputHeading">
                 <p id="cryptoOutput" aria-label="Encrypted ciphertext in Base64" data-placeholder="Encrypted data will appear here."></p>
-                <button id="saveToManagerButton" aria-label="Save to Password Manager" title="Save to Password Manager"
+                <button id="saveToManagerButton" aria-label="Save to Independent Items" title="Save to Independent Items"
                     style="position: absolute; bottom: 0.75rem; right: 2.75rem; background-color: transparent; border: none; padding: 0.375rem; cursor: pointer; color: #4B5563; border-radius: 0.25rem; line-height: 0; z-index: 5;">
                     <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20"
                         viewBox="0 0 24 24" fill="currentColor">
@@ -203,14 +263,69 @@
         <div id="manager" class="tab-content" role="tabpanel" aria-labelledby="managerTab">
         <section class="ui-section" id="password-manager">
             <div class="pm-header">
-                <h2>Password Manager</h2>
-                <button class="pm-button" id="add-password-btn">Add New</button>
+                <div><h2>Saved items</h2><p class="workspace-hint">Individual ciphertexts, each with its own unlock credentials.</p></div>
+                <button class="pm-button" id="add-password-btn">＋ Add item</button>
             </div>
+            <details class="manager-credentials" id="managerCredentials">
+                <summary><span>Decryption credentials</span><span class="workspace-hint">Enter before unlocking an item</span></summary>
+                <div id="manager-factors"></div>
+            </details>
             <div id="password-list">
                 <!-- Password cards will be injected here by JavaScript -->
             </div>
         </section>
         </div><!-- /#manager -->
+        <!-- ============ Section 1: the three secret factors ============ -->
+        <section class="ui-section" id="secretFactors" hidden aria-label="Unlock credentials">
+            <div class="credentials-heading"><h3>Unlock credentials</h3><span>ALL THREE REQUIRED</span></div>
+            <p id="factorContext" class="workspace-hint">Enter the three secret factors for this operation.</p>
+            <div class="factors-heading">
+                <div class="factor-card factor-password">
+                    <div class="factor-header">
+                        <h3 id="passwordFactorLabel"><span class="factor-number">01</span> Password</h3>
+                        <div class="password-body">
+                            <input type="password" id="passwordEncrypt" placeholder="Enter your secret password" aria-labelledby="passwordFactorLabel" autocomplete="off">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="factors-layout">
+                <div class="factor-card factor-pattern">
+                    <div class="factor-header">
+                        <h3 id="signaturePatternLabel"><span class="factor-number">02</span> Signature pattern</h3>
+                        <details class="help-menu">
+                            <summary aria-label="Pattern instructions" title="Pattern instructions">?</summary>
+                            <div class="help-popover">
+                                <h4>Pattern instructions</h4>
+                                <p>Use the guide to draw clear turns and long strokes. Green dots mark the start of each stroke.</p>
+                                <p>Before encrypting, redraw the same pattern and confirm the match.</p>
+                            </div>
+                        </details>
+                    </div>
+                    <div id="signaturePadCrypto" role="group" aria-labelledby="signaturePatternLabel"></div>
+                </div>
+                <div class="factor-card factor-grid">
+                    <div class="factor-header">
+                        <h3 id="colorGridLabel"><span class="factor-number">03</span> Color grid <span class="label-detail">/ Path</span></h3>
+                        <details class="help-menu" id="gridInstructions">
+                            <summary aria-label="Grid instructions" title="Grid instructions">?</summary>
+                            <div class="help-popover">
+                                <h4>Grid instructions</h4>
+                                <p>Click a cell to cycle its color: Default → Red → Green → Blue → Black → Default.</p>
+                                <p>Drag from a colored cell to paint with that color. Empty cells cannot start a drag.</p>
+                                <p>Your selection order is part of the secret. Recreate the same colors and order to decrypt.</p>
+                            </div>
+                        </details>
+                    </div>
+                    <div id="ChessboardEncrypt" role="group" aria-labelledby="colorGridLabel"></div>
+                </div>
+            </div>
+
+        </section>
+
+
+        <footer class="workspace-footer"><span>Made for your eyes only.</span><span>Password + pattern + color grid</span></footer>
+        </main>
     </div>
 
     <!-- Password Generator Modal -->
@@ -305,6 +420,7 @@
 
     <script type="module" src="index.js"></script>
     <script type="module" src="password_manager.js"></script>
+    <script type="module" src="vault_manager.js"></script>
 </body>
 
 </html>

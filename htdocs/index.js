@@ -58,7 +58,12 @@ let cryptoWorker = null;
 const operations = new OperationState();
 let resultKind = null;
 let uiTimers = [];
-window.isCryptoBusy = () => operations.busy;
+let vaultBusy = false;
+let activeWorkspace = 'vault';
+let vaultFactorsVisible = false;
+let vaultFactorHint = '';
+window.isCryptoBusy = () => operations.busy || vaultBusy;
+window.setVaultBusy = value => { vaultBusy = value; syncBusyUI(); };
 
 function cancelUITimers() {
     uiTimers.forEach(clearTimeout);
@@ -68,7 +73,7 @@ function later(fn, delay) {
     uiTimers.push(setTimeout(() => { if (!operations.busy) fn(); }, delay));
 }
 function syncBusyUI() {
-    const busy = operations.busy;
+    const busy = operations.busy || vaultBusy;
     actionButton.disabled = busy || !operations.ready;
     modeButtons.forEach(btn => { btn.disabled = busy; });
     saveToManagerButton.disabled = busy || resultKind !== 'encrypt';
@@ -143,7 +148,7 @@ function startProcessing(message) {
 // Switch between the mutually exclusive input panes (Data to Encrypt / Ciphertext).
 // Only visibility changes: textarea contents are preserved.
 function setMode(mode) {
-    if (operations.busy) return false;
+    if (operations.busy || vaultBusy) return false;
     if (mode !== currentMode) { cryptoOutput.innerText = ''; resultKind = null; }
     currentMode = mode === 'decrypt' ? 'decrypt' : 'encrypt';
     const isEncrypt = currentMode === 'encrypt';
@@ -176,12 +181,28 @@ modeButtons.forEach(btn => {
     });
 });
 
-// Header tabs: "Data Panel" ⇄ "Password Manager".
-// The three secret factors stay visible while switching.
+// Workspace tabs share the factor controls when an operation needs them.
 const tabs = document.querySelectorAll('.tab-button');
 const tabContents = document.querySelectorAll('.tab-content');
+const workspaceCopy = {
+    vault: ['ORGANIZE & PROTECT', 'Password vaults', 'All your accounts, behind one unlock.'],
+    data: ['ENCRYPT & DECRYPT', 'Text encryption', 'A private space for the things you want to protect.'],
+    manager: ['SAVE & REVISIT', 'Independent items', 'Your saved ciphertexts, organized in one place.'],
+};
+const mobileNavigation = window.matchMedia('(max-width: 760px)');
+function syncNavigationOrientation() {
+    document.querySelector('.workspace-tabs').setAttribute('aria-orientation', mobileNavigation.matches ? 'horizontal' : 'vertical');
+}
+mobileNavigation.addEventListener('change', syncNavigationOrientation);
+syncNavigationOrientation();
 
 function switchToTab(tabId) {
+    if (!['vault', 'data', 'manager'].includes(tabId)) return;
+    activeWorkspace = tabId;
+    const [eyebrow, title, description] = workspaceCopy[tabId];
+    getElement('workspaceEyebrow').textContent = eyebrow;
+    getElement('workspaceTitle').textContent = title;
+    getElement('workspaceDescription').textContent = description;
     tabs.forEach(t => {
         const isActive = t.dataset.tab === tabId;
         t.classList.toggle('active', isActive);
@@ -196,6 +217,8 @@ function switchToTab(tabId) {
     if (tabId === 'manager' && window.refreshPasswordList) {
         window.refreshPasswordList();
     }
+    updateFactorVisibility();
+    window.dispatchEvent(new CustomEvent('workspacechange', { detail: tabId }));
     // Tabs never reset the active job, its progress, or its result.
 }
 // Expose it to global scope for other modules (e.g. the Password Manager
@@ -212,8 +235,8 @@ tabs.forEach(tab => {
 tabs.forEach((tab, index) => {
     tab.addEventListener('keydown', event => {
         let next;
-        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
-        else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+        if (event.key === (mobileNavigation.matches ? 'ArrowRight' : 'ArrowDown')) next = (index + 1) % tabs.length;
+        else if (event.key === (mobileNavigation.matches ? 'ArrowLeft' : 'ArrowUp')) next = (index + tabs.length - 1) % tabs.length;
         else if (event.key === 'Home') next = 0;
         else if (event.key === 'End') next = tabs.length - 1;
         else return;
@@ -261,6 +284,40 @@ window.scrollToSection = (id) => {
 // --- rule factor (factor C): hand-drawn pattern -> chain-code sequence ---
 const signaturePadCrypto = getElement('signaturePadCrypto');
 const sigPad = createSignaturePad(signaturePadCrypto, { height: 232 });
+
+function updateFactorVisibility() {
+    const section = getElement('secretFactors');
+    let slot = `${activeWorkspace}-factors`;
+    if (activeWorkspace === 'vault') {
+        slot = !getElement('vault-change-form').hidden ? 'vault-change-factors'
+            : !getElement('vault-import-form').hidden ? 'vault-import-factors' : 'vault-access-factors';
+    }
+    const host = getElement(slot);
+    // Move the existing controls; keep the drawing, React grid and field values.
+    if (section.parentElement !== host) host.append(section);
+    section.hidden = activeWorkspace === 'vault' && !vaultFactorsVisible;
+    getElement('factorContext').textContent = activeWorkspace === 'vault' ? vaultFactorHint : 'Enter the password, pattern and color grid for this independent item.';
+}
+window.setVaultFactorContext = (visible, hint = '') => {
+    vaultFactorsVisible = visible;
+    vaultFactorHint = hint;
+    updateFactorVisibility();
+};
+window.getSecretFactors = (requireVerified = false) => {
+    if (operations.busy) throw new Error('Wait for the text operation to finish.');
+    const factor = getRuleFactor(requireVerified);
+    if (!factor.ok) throw new Error(factor.error);
+    const path = getChessboardData('cryptoBoard', 'full');
+    if (!passwordInput.value || !path) throw new Error('Enter your password and select the color grid.');
+    return { password: passwordInput.value, rulePhrase: factor.value, path };
+};
+window.clearSecretFactors = () => {
+    passwordInput.value = '';
+    sigPad.setLocked(false);
+    sigPad.clear();
+    window.reactAppRef.current?.reset?.();
+    syncBusyUI();
+};
 
 function getRuleFactor(requireVerified = false) {
     if (requireVerified && !sigPad.isVerified()) {
@@ -421,7 +478,7 @@ function initializeWorker() {
 
 
 function performOperation(action, origin = 'crypto') {
-    if (operations.busy) return false;
+    if (operations.busy || vaultBusy) return false;
     if (!cryptoWorker || !operations.ready) {
         displayError('Encryption is still initializing. Please wait.');
         return false;
@@ -471,6 +528,7 @@ actionButton.addEventListener('click', () => {
 // Pass true when the Password Manager card starts the decryption: the decrypted
 // text is then shown in the floating result window (modal); errors never pop up.
 window.triggerDecrypt = (fromManager = false) => {
+    if (fromManager && activeWorkspace === 'manager') getElement('managerCredentials').open = true;
     return performOperation('decrypt', fromManager ? 'manager' : 'crypto');
 };
 
@@ -523,10 +581,10 @@ saveToManagerButton.addEventListener('click', async () => {
         // its card list so the new entry shows up immediately.
         if (window.refreshPasswordList) window.refreshPasswordList();
 
-        loadingIndicator.textContent = "Saved to Password Manager!";
+        loadingIndicator.textContent = "Saved to Independent Items!";
         loadingIndicator.style.display = 'block';
         later(() => {
-            if (loadingIndicator.textContent === "Saved to Password Manager!") {
+            if (loadingIndicator.textContent === "Saved to Independent Items!") {
                 loadingIndicator.style.display = 'none';
             }
         }, 2000);
@@ -640,3 +698,4 @@ setMode('encrypt');
 // Initialize the worker last, after UI is set up
 syncBusyUI();
 initializeWorker();
+updateFactorVisibility();
