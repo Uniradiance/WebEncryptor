@@ -173,7 +173,7 @@ def main():
                 flow.check(reactAppRef.current.getFullData() === 'REDB0GREENA0', 'grid color/order incorrect');
                 document.querySelector('[aria-label="Undo cell change"]').click(); await flow.frame();
                 flow.check(reactAppRef.current.getFullData() === 'REDA0REDB0', 'undo did not restore prior color/order');
-                flow.check(document.getElementById('A0').textContent === '1', 'grid order labels missing');
+                flow.check([...document.querySelectorAll('[data-cell]')].every(cell => cell.textContent === ''), 'grid cells must display only color');
                 document.querySelector('.grid-status button').click(); await flow.frame();
                 flow.check(reactAppRef.current.getFullData() === 'REDA0REDB0', 'hiding changed actual grid');
                 await flow.cell('C0');

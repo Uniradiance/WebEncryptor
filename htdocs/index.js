@@ -17,6 +17,7 @@ const plaintextInput = getElement('plaintext');
 const passwordInput = getElement('passwordEncrypt');
 const ChessboardInput = getElement('ChessboardEncrypt');
 const actionButton = getElement('actionButton');
+const actionButtonLabel = getElement('actionButtonLabel');
 const cryptoOutput = getElement('cryptoOutput');
 const cryptoOutputHeading = getElement('cryptoOutputHeading');
 const copyCiphertextButton = getElement('copyCiphertextButton');
@@ -155,7 +156,9 @@ function setMode(mode) {
     encryptCard.classList.toggle('active', isEncrypt);
     decryptCard.classList.toggle('active', !isEncrypt);
 
-    cryptoOutputHeading.textContent = isEncrypt ? 'Ciphertext (Base64):' : 'Decrypted Plaintext:';
+    cryptoOutputHeading.textContent = isEncrypt ? 'Ciphertext (Base64)' : 'Decrypted Plaintext';
+    actionButtonLabel.textContent = isEncrypt ? 'Encrypt' : 'Decrypt';
+    cryptoOutput.dataset.placeholder = isEncrypt ? 'Encrypted data will appear here.' : 'Decrypted data will appear here.';
     cryptoOutput.setAttribute('aria-label', isEncrypt ? 'Encrypted ciphertext in Base64' : 'Decrypted plaintext');
     actionButton.title = isEncrypt ? 'Encrypt Data' : 'Decrypt Data';
     actionButton.setAttribute('aria-label', isEncrypt ? 'Encrypt data' : 'Decrypt data');
@@ -173,7 +176,7 @@ modeButtons.forEach(btn => {
     });
 });
 
-// Sub-tabs below the factors section: "Data Panel" ⇄ "Password Manager".
+// Header tabs: "Data Panel" ⇄ "Password Manager".
 // The three secret factors stay visible while switching.
 const tabs = document.querySelectorAll('.tab-button');
 const tabContents = document.querySelectorAll('.tab-content');
@@ -183,6 +186,7 @@ function switchToTab(tabId) {
         const isActive = t.dataset.tab === tabId;
         t.classList.toggle('active', isActive);
         t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        t.tabIndex = isActive ? 0 : -1;
     });
     tabContents.forEach(content => {
         content.classList.toggle('active', content.id === tabId);
@@ -204,6 +208,47 @@ tabs.forEach(tab => {
     });
 });
 
+// Keep tab navigation usable with a keyboard.
+tabs.forEach((tab, index) => {
+    tab.addEventListener('keydown', event => {
+        let next;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        switchToTab(tabs[next].dataset.tab);
+        tabs[next].focus();
+    });
+});
+
+// Instructions float over the workspace and close on outside click or Escape.
+const helpMenus = document.querySelectorAll('.help-menu');
+helpMenus.forEach(menu => {
+    menu.addEventListener('toggle', () => {
+        if (menu.open) helpMenus.forEach(other => { if (other !== menu) other.open = false; });
+    });
+});
+document.addEventListener('click', event => {
+    helpMenus.forEach(menu => { if (!menu.contains(event.target)) menu.open = false; });
+});
+document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    if (moreOptionsMenu.style.display === 'block') {
+        moreOptionsMenu.style.display = 'none';
+        moreOptionsBtn.setAttribute('aria-expanded', 'false');
+        moreOptionsBtn.focus();
+    }
+    helpMenus.forEach(menu => {
+        if (menu.open) {
+            const hadFocus = menu.contains(document.activeElement);
+            menu.open = false;
+            if (hadFocus) menu.querySelector('summary').focus();
+        }
+    });
+});
+
 // Smoothly scroll to a page section (used by the Password Manager when a
 // card asks to "jump" to the Data Panel after switching to its tab).
 window.scrollToSection = (id) => {
@@ -215,7 +260,7 @@ window.scrollToSection = (id) => {
 
 // --- rule factor (factor C): hand-drawn pattern -> chain-code sequence ---
 const signaturePadCrypto = getElement('signaturePadCrypto');
-const sigPad = createSignaturePad(signaturePadCrypto);
+const sigPad = createSignaturePad(signaturePadCrypto, { height: 232 });
 
 function getRuleFactor(requireVerified = false) {
     if (requireVerified && !sigPad.isVerified()) {
@@ -366,17 +411,6 @@ function initializeWorker() {
             resultKind = null;
             resetUIState(`Crypto worker failed: ${e.message}. Refresh to retry.`);
         };
-
-        // Indicate worker is ready or initializing.
-        // resetUIState will hide loadingIndicator eventually if no errors.
-        loadingIndicator.textContent = "Worker initialized.";
-        loadingIndicator.style.display = 'block';
-        later(() => {
-            if (loadingIndicator.textContent === "Worker initialized.") {
-                loadingIndicator.style.display = 'none';
-            }
-        }, 1500);
-
 
     } else {
         displayError('Web Workers are not supported in your browser. This application cannot function.');

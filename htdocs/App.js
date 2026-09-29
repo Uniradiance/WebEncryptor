@@ -11,13 +11,6 @@ window.reactAppRef = {
   current: null
 };
 
-// Style constants in REM
-const GRID_GAP_REM = 0.25;
-const GRID_PADDING_REM = 0.5;
-const ROW_LABEL_WIDTH_REM = 2;
-const COL_LABEL_HEIGHT_REM = 2;
-const LABELS_CONTAINER_MARGIN_REM = 0.25; // Margin between row/col labels container and the grid container
-
 // SVG Icon Components
 const UndoIcon = ({ color = 'currentColor', size = 20 }) => (
   React.createElement('svg', {
@@ -43,82 +36,14 @@ const App = () => {
   const [hidden, setHidden] = useState(false);
   const [locked, setLocked] = useState(false);
   const ordered = useMemo(() => orderedCells(cells), [cells]);
-  const orderLabels = Object.fromEntries(ordered.map((cell, i) => [cell.id, i + 1]));
   const [isPressing, setIsPressing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [interactionOriginCell, setInteractionOriginCell] = useState(null);
   const [nextColorForOriginOrDrag, setNextColorForOriginOrDrag] = useState(undefined);
 
-  const [dynamicFooterFontSize, setDynamicFooterFontSize] = useState('0.875rem');
-
   const isPressingRef = useRef(false);
   const lastInteractionTypeRef = useRef(null);
   const lastInteractionTimeRef = useRef(0);
-
-  const actualGridRef = useRef(null);
-  const [dynamicCellSize, setDynamicCellSize] = useState(null); // Will be in pixels
-
-  const [undoHovered, setUndoHovered] = useState(false);
-  const [resetHovered, setResetHovered] = useState(false);
-
-  const remToPx = useCallback((remValue) => {
-    if (typeof window === 'undefined' || typeof getComputedStyle === 'undefined' || !document.documentElement) return remValue * 16; // Fallback
-    return remValue * parseFloat(getComputedStyle(document.documentElement).fontSize);
-  }, []);
-
-
-  useEffect(() => {
-    const calculateCellSize = () => {
-      if (actualGridRef.current) {
-        const gridElement = actualGridRef.current;
-
-        const gridGapPx = remToPx(GRID_GAP_REM);
-
-        const cs = window.getComputedStyle(gridElement);
-        const gridPaddingLeftPx = parseFloat(cs.paddingLeft) || 0;
-        const gridPaddingRightPx = parseFloat(cs.paddingRight) || 0;
-
-        const netGridContentsWidth = gridElement.offsetWidth - gridPaddingLeftPx - gridPaddingRightPx;
-        const totalGapWidth = (COLS - 1) * gridGapPx;
-        const calculatedSize = (netGridContentsWidth - totalGapWidth) / COLS;
-
-        setDynamicCellSize(calculatedSize > 0 ? calculatedSize : null);
-      }
-    };
-
-    calculateCellSize();
-
-    const observer = new ResizeObserver(calculateCellSize);
-    if (actualGridRef.current) {
-      observer.observe(actualGridRef.current);
-    }
-
-    // Initial calculation after mount, and on window resize
-    window.addEventListener('resize', calculateCellSize);
-
-    return () => {
-      window.removeEventListener('resize', calculateCellSize);
-      if (actualGridRef.current && observer) {
-        observer.unobserve(actualGridRef.current);
-      }
-    };
-  }, [COLS, remToPx]); // remToPx is stable, COLS is constant
-
-  useEffect(() => {
-    const handleResizeFooterFont = () => {
-      if (window.innerWidth < 768) { // Breakpoint for smaller screens
-        const size = `${window.innerWidth * 0.001}rem`;
-        setDynamicFooterFontSize(size); // Smaller font size
-      } else {
-        setDynamicFooterFontSize('0.875rem'); // Default font size
-      }
-    };
-
-    window.addEventListener('resize', handleResizeFooterFont);
-    handleResizeFooterFont(); // Call on initial mount to set the correct size
-
-    return () => window.removeEventListener('resize', handleResizeFooterFont);
-  }, []);
 
   const updateCellColor = useCallback((row, col, color) => {
     dispatchGrid({ type: 'paint', row, col, color });
@@ -308,200 +233,49 @@ const App = () => {
     setHidden(false);
   }, []);
 
-  // Styles
-  const appStyle = {
-    minHeight: '10vh',
-    padding: '1rem',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    boxSizing: 'border-box',
-    overflowX: 'hidden',
-  };
-
-  const gridAndControlsContainerStyle = {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: '2rem',
-    marginBottom: '2rem',
-    width: '100%',
-  };
-
-  const actionsPanelStyle = {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '0.5rem',
-    paddingLeft: '0.5rem',
-    minWidth: '50px', // Minimum width for the actions panel
-    flexShrink: 0, // Prevent this panel from shrinking in flex layout
-    alignItems: 'flex-start',
-  };
-
-
-  const mainGridContainerStyle = {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    minWidth: 0, // Crucial for allowing this container to shrink
-  };
-
-  const colLabelsContainerStyle = {
-    display: 'flex',
-    alignItems: 'center',
-    marginBottom: `${LABELS_CONTAINER_MARGIN_REM}rem`,
-    paddingLeft: `calc(${ROW_LABEL_WIDTH_REM}rem + ${LABELS_CONTAINER_MARGIN_REM}rem + ${GRID_PADDING_REM}rem)`,
-    boxSizing: 'border-box',
-    width: '100%',
-    minWidth: 0,
-  };
-
-  const baseLabelStyle = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '0.875rem',
-    fontWeight: '500',
-    color: '#9CA3AF',
-    boxSizing: 'border-box',
-  };
-
-  const colLabelStyle = (isLast) => ({
-    ...baseLabelStyle,
-    width: dynamicCellSize ? `${dynamicCellSize}px` : `${remToPx(4)}px`, // Dynamic width
-    height: `${COL_LABEL_HEIGHT_REM}rem`,
-    marginRight: isLast ? '0px' : `${remToPx(GRID_GAP_REM)}px`, // Use calculated pixel value for gap
-  });
-
-  const rowLabelsContainerStyle = {
-    display: 'flex',
-    flexDirection: 'column',
-    marginRight: `${LABELS_CONTAINER_MARGIN_REM}rem`,
-    paddingTop: `${GRID_PADDING_REM}rem`,
-    flexShrink: 0,
-  };
-
-  const rowLabelStyle = (isLast) => ({
-    ...baseLabelStyle,
-    width: `${ROW_LABEL_WIDTH_REM}rem`,
-    height: dynamicCellSize ? `${dynamicCellSize}px` : `${remToPx(4)}px`, // Dynamic height
-    marginBottom: isLast ? '0px' : `${remToPx(GRID_GAP_REM)}px`, // Consistent pixel gap
-  });
-
-  const gridAndRowLabelsFlexContainer = {
-    display: 'flex',
-    flex: 1, // Takes available vertical space in gridSectionContainerStyle
-    minHeight: 0, // Important for flex children in a container that might shrink
-  };
-
-  const actualGridStyle = {
-    display: 'grid',
-    gridTemplateColumns: `repeat(${COLS}, 1fr)`,
-    gap: `${GRID_GAP_REM}rem`,
-    padding: `${GRID_PADDING_REM}rem`,
-    backgroundColor: 'rgb(191 227 255)',
-    borderRadius: '0.1rem',
-    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)',
-    flex: 1, // Takes available horizontal space in gridAndRowLabelsFlexContainer
-    aspectRatio: '1 / 1',
-    minWidth: '200px', // Minimum size for the grid
-    minHeight: '200px', // Minimum size for the grid
-    boxSizing: 'border-box',
-  };
-
-  const actionIconButtonStyle = (disabled = false, hovered = false) => ({
-    backgroundColor: hovered && !disabled ? 'rgba(129, 140, 248, 0.15)' : 'transparent', // Subtle hover background
-    color: disabled ? '#6B7280' : (hovered ? '#A5B4FC' : '#818CF8'), // For SVG fill="currentColor"
-    padding: '0.5rem',
-    border: 'none',
-    borderRadius: '0.375rem', // Rounded corners for the button
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    opacity: disabled ? 0.5 : 1, // Slightly more pronounced opacity for disabled
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transition: 'background-color 0.15s ease-in-out, color 0.15s ease-in-out',
-    width: '36px', // Ensuring buttons are square and consistently sized
-    height: '36px',
-  });
-
-  const footerStyle = {
-    textAlign: 'center',
-    color: '#6B7280',
-    fontSize: dynamicFooterFontSize,
-  };
-
-  const iconSize = 20;
-
   return (
-    React.createElement('div', { style: appStyle },
-      React.createElement('div', { className: 'grid-status', role: 'status', 'aria-live': 'polite' },
-        React.createElement('span', null, hidden ? 'Grid hidden. Your selected cells are retained.' :
-          ordered.length ? `Grid ready: ${ordered.length} selected cells. Numbers show the order used for encryption.` : 'Select cells to set your grid.'),
-        React.createElement('button', { type: 'button', disabled: !ordered.length || locked,
-          onClick: () => setHidden(value => !value), 'aria-pressed': hidden }, hidden ? 'Show grid' : 'Hide grid')
-      ),
-      React.createElement('div', { style: gridAndControlsContainerStyle },
-        React.createElement('div', { style: mainGridContainerStyle },
-          React.createElement('div', { style: colLabelsContainerStyle },
-            COL_LABELS.map((label, index) => (
-              React.createElement('div', {
-                key: label,
-                style: colLabelStyle(index === COL_LABELS.length - 1)
-              }, label)
-            ))
-          ),
-          React.createElement('div', { style: gridAndRowLabelsFlexContainer },
-            React.createElement('div', { style: rowLabelsContainerStyle },
-              ROW_LABELS.map((label, index) => (
-                React.createElement('div', {
-                  key: label,
-                  style: rowLabelStyle(index === ROW_LABELS.length - 1)
-                }, label)
-              ))
-            ),
-            React.createElement('div', { style: actualGridStyle, ref: actualGridRef },
-              cells.map((row) =>
-                row.map((cellData) => (
-                  React.createElement(Cell, {
-                    key: cellData.id,
-                    cellData: cellData,
-                    hidden,
-                    disabled: hidden || locked,
-                    order: orderLabels[cellData.id],
-                    onInteractionStart: handleCellInteractionStart,
-                    onPointerEnter: handlePointerMoveOverCell,
-                  })
-                ))
-              )
-            ),
-            React.createElement('div', { style: actionsPanelStyle },
-              React.createElement('button', {
-                onClick: handleUndo,
-                style: actionIconButtonStyle(!gridState.history.length || locked, undoHovered),
-                onMouseEnter: () => setUndoHovered(true),
-                onMouseLeave: () => setUndoHovered(false),
-                'aria-label': "Undo cell change",
-                title: "Undo Change",
-                disabled: !gridState.history.length || hidden || locked,
-              }, React.createElement(UndoIcon, { size: iconSize })),
-              React.createElement('button', {
-                onClick: handleReset,
-                style: actionIconButtonStyle(!hasActiveCells, resetHovered),
-                onMouseEnter: () => setResetHovered(true),
-                onMouseLeave: () => setResetHovered(false),
-                'aria-label': "Reset entire grid",
-                title: "Reset Grid",
-                disabled: !hasActiveCells || locked,
-              }, React.createElement(ResetIcon, { size: iconSize }))
-            )
-          )
+    React.createElement('div', { className: 'grid-app' },
+      React.createElement('div', { className: 'grid-board-layout', style: { '--grid-cols': COLS, '--grid-rows': ROWS } },
+        React.createElement('div', { className: 'grid-col-labels', 'aria-hidden': true },
+          COL_LABELS.map(label => React.createElement('span', { key: label }, label))
+        ),
+        React.createElement('div', { className: 'grid-row-labels', 'aria-hidden': true },
+          ROW_LABELS.map(label => React.createElement('span', { key: label }, label))
+        ),
+        React.createElement('div', { className: 'color-grid', role: 'grid', 'aria-label': 'Color path' },
+          cells.flat().map(cellData => React.createElement(Cell, {
+            key: cellData.id,
+            cellData,
+            hidden,
+            disabled: hidden || locked,
+            onInteractionStart: handleCellInteractionStart,
+            onPointerEnter: handlePointerMoveOverCell,
+          }))
+        ),
+        React.createElement('div', { className: 'grid-actions' },
+          React.createElement('button', {
+            type: 'button',
+            onClick: handleUndo,
+            className: 'grid-icon-button',
+            'aria-label': 'Undo cell change',
+            title: 'Undo Change',
+            disabled: !gridState.history.length || hidden || locked,
+          }, React.createElement(UndoIcon)),
+          React.createElement('button', {
+            type: 'button',
+            onClick: handleReset,
+            className: 'grid-icon-button',
+            'aria-label': 'Reset entire grid',
+            title: 'Reset Grid',
+            disabled: !hasActiveCells || locked,
+          }, React.createElement(ResetIcon))
         )
       ),
-      React.createElement('footer', { style: footerStyle },
-        React.createElement('p', null, 'Tap/click cells to change color. Tap/click and drag to paint multiple cells.'),
-        React.createElement('p', null, 'Color cycle: Default \u2192 Red \u2192 Green \u2192 Blue \u2192 Black \u2192 Default.'),
-        React.createElement('p', null, 'Dragging paints with the cell\'s current color. Dragging from an empty (Default/White) cell is disabled.')
+      React.createElement('div', { className: 'grid-status', role: 'status', 'aria-live': 'polite' },
+        React.createElement('span', null, hidden ? 'Grid hidden · selection retained' :
+          ordered.length ? `${ordered.length} cells selected` : 'Select cells to set your path.'),
+        React.createElement('button', { type: 'button', disabled: !ordered.length || locked,
+          onClick: () => setHidden(value => !value), 'aria-pressed': hidden }, hidden ? 'Show grid' : 'Hide grid')
       )
     )
   );

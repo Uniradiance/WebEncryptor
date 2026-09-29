@@ -12,6 +12,7 @@ package-lock.json
 .gocache/
 .gopath/
 .testrun/
+__pycache__/
 rust/recognition/target/
 .rust-sysroot/
 .rustup/

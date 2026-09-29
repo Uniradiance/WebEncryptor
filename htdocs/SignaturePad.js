@@ -44,7 +44,7 @@ export function createSignaturePad(container, options = {}) {
 
   container.innerHTML = `
         <div class="sigpad">
-            <p class="sigpad-help">Use the grid as a guide. Keep turns clear and legs long. Start markers show stroke order.</p>
+            <p class="sigpad-help">Draw clear turns with long strokes.</p>
             <div class="sigpad-stage">
                 <canvas class="sigpad-canvas"></canvas>
                 <div class="sigpad-stamp" hidden>SIGNED</div>
@@ -64,9 +64,11 @@ export function createSignaturePad(container, options = {}) {
                     <button type="button" class="sigpad-clear" title="Clear everything and redraw" aria-label="Clear everything and redraw">
                         <svg t="1787562970259" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="10510" width="32" height="32"><path d="M634.5728 118.1184l319.3856 320.0512a75.5712 75.5712 0 0 1 0 106.7008l-318.464 319.1296h308.48a32 32 0 0 1 4.7616 63.6416l-4.7616 0.3584H80.0256a32 32 0 0 1-4.7104-63.6416l4.7616-0.3584h231.6288l-209.8688-212.48a75.5712 75.5712 0 0 1 0.256-106.3936l426.0864-427.008a75.1616 75.1616 0 0 1 106.496 0zM282.112 455.2704L147.4048 590.336a11.5712 11.5712 0 0 0-1.8944 13.824l1.8432 2.4064 254.2592 257.3824h143.616l73.8816-74.0864L282.112 455.2704z" fill="#1D2129" p-id="10511"></path></svg>
                     </button>
-                    <button type="button" class="sigpad-verify" disabled>Redraw to verify</button>
-                    <button type="button" class="sigpad-cancel-verify" hidden>Cancel verification</button>
-                    <button type="button" class="sigpad-confirm" title="Confirm: erase the ink and stamp the pad" disabled>Confirm</button>
+                    <span class="sigpad-verification-actions">
+                        <button type="button" class="sigpad-verify" disabled>Redraw to verify</button>
+                        <button type="button" class="sigpad-cancel-verify" hidden>Cancel verification</button>
+                        <button type="button" class="sigpad-confirm" title="Confirm: erase the ink and stamp the pad" disabled>Confirm</button>
+                    </span>
                 </span>
             </div>
         </div>`;
@@ -108,7 +110,7 @@ export function createSignaturePad(container, options = {}) {
 
   // --- canvas sizing (devicePixelRatio aware) ---
   const resize = () => {
-    const width = Math.max(1, container.clientWidth);
+    const width = Math.max(1, canvas.clientWidth);
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.floor(width * dpr);
     canvas.height = Math.floor(height * dpr);

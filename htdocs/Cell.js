@@ -4,7 +4,7 @@ import { COLOR_TO_STYLE_MAP, DEFAULT_CELL_STYLE, BORDER_COLOR_VALUE } from './co
 
 // Removed CellProps interface
 
-const Cell = ({ cellData, onInteractionStart, onPointerEnter, hidden = false, disabled = false, order }) => {
+const Cell = ({ cellData, onInteractionStart, onPointerEnter, hidden = false, disabled = false }) => {
   const cellStyleFromMap = !hidden && cellData.color ? COLOR_TO_STYLE_MAP[cellData.color] : DEFAULT_CELL_STYLE;
 
   const handleMouseDown = (event) => {
@@ -33,7 +33,7 @@ const Cell = ({ cellData, onInteractionStart, onPointerEnter, hidden = false, di
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    cursor: 'pointer',
+    cursor: disabled ? 'default' : 'pointer',
     userSelect: 'none', 
     touchAction: 'none', 
     transition: 'background-color 0.15s', 
@@ -51,10 +51,10 @@ const Cell = ({ cellData, onInteractionStart, onPointerEnter, hidden = false, di
       'data-col': cellData.col,
       'data-cell': "true",
       role: "gridcell",
-      'aria-label': hidden ? `Cell ${cellData.id}, hidden` : `Cell ${cellData.id}, Color: ${cellData.color || 'None'}, Order: ${order || 'none'}`,
+      'aria-label': hidden ? `Cell ${cellData.id}, hidden` : `Cell ${cellData.id}, Color: ${cellData.color || 'None'}`,
       'aria-disabled': disabled,
       id: cellData.id
-    }, hidden ? '•' : (order || '')
+    }, null
     )
   );
 };
