@@ -34,6 +34,25 @@ func decodeBase64(s string) ([]byte, error) {
 	return b, nil
 }
 
+// Validate new writes only: preserve readability of legacy databases without
+// silently copying a newly supplied plaintext password into persistent storage.
+func validateTextCiphertext(value string) error {
+	if value == "" {
+		return nil
+	} // empty draft
+	p := strings.Split(value, ".")
+	if len(value) > maxPasswordBytes || len(p) != 5 || p[0] != "WE2" {
+		return errors.New("expected a WE2 ciphertext, not plaintext")
+	}
+	for i, size := range []int{16, 12, -1, 16} {
+		b, err := decodeBase64(p[i+1])
+		if err != nil || (size >= 0 && len(b) != size) || (size < 0 && (len(b) == 0 || len(b) > 4*1024*1024)) {
+			return errors.New("invalid ciphertext field lengths or Base64")
+		}
+	}
+	return nil
+}
+
 func validateWrappedKey(value, vaultID string) error {
 	if len(value) > 2048 {
 		return errors.New("encrypted vault key is too large")
@@ -137,6 +156,9 @@ func createVaultFields(p *PasswordEntry, u passwordUpdate, entries []PasswordEnt
 		if u.VaultID != nil || u.Children != nil || u.Revision != nil {
 			return errors.New("vault fields require type vault")
 		}
+		if err := validateTextCiphertext(p.Password); err != nil {
+			return err
+		}
 		return validateStoredEntry(*p)
 	}
 	if u.VaultID == nil || u.Children == nil || u.Password == nil || (u.Revision != nil && *u.Revision != 0) {
@@ -156,6 +178,9 @@ func updateVaultFields(p *PasswordEntry, u passwordUpdate) error {
 	if p.Type != "vault" {
 		if u.VaultID != nil || u.Children != nil || u.Revision != nil || (u.Type != nil && *u.Type != p.Type) {
 			return errors.New("record type cannot change; create a new vault")
+		}
+		if u.Password != nil {
+			return validateTextCiphertext(*u.Password)
 		}
 		return nil
 	}

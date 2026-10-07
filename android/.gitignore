@@ -1,0 +1,19 @@
+# Build outputs
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing material must never be committed.
+*.jks
+*.keystore
+keystore.properties
+
+# Scratch space used by tools/ci-build.sh when the host workspace is small.
+.buildstage/
+build-artifacts/

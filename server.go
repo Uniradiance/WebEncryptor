@@ -730,7 +730,7 @@ func main() {
 	log.Printf("%s server starting on %s", strings.ToUpper(scheme), url)
 	if *token != "" {
 		log.Printf("API access token: %s", *token)
-		log.Printf("   The browser asks for this token on first visit to the Manager (stored in localStorage).")
+		log.Printf("   The browser asks for this token on first visit to the Manager (kept in page memory only).")
 	} else {
 		log.Printf("WARNING: no API access token set (--token).")
 		log.Printf("   Anyone who can reach this port can read/write the password database; run: webencryptor --token <random-string>")

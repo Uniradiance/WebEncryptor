@@ -686,6 +686,37 @@ async function getClipboardText() {
 // closes the dialog directly (the old ❌ corner button was removed).
 closeDecryptResultActionButton.addEventListener('click', () => {
     decryptResultDialog.style.display = 'none';
+    decryptResultText.textContent = '';
+});
+
+// Navigation/BFCache must not retain a usable secret workspace or let a late
+// worker reply repopulate it. A restored page starts with a fresh worker.
+window.clearCryptoSession = () => {
+    if (cryptoWorker) {
+        cryptoWorker.onmessage = null;
+        cryptoWorker.onerror = null;
+        cryptoWorker.terminate();
+        cryptoWorker = null;
+    }
+    operations.ready = false;
+    operations.finish();
+    operations.saving = false;
+    cancelUITimers();
+    resultKind = null;
+    plaintextInput.value = '';
+    cryptoOutput.textContent = '';
+    decryptResultText.textContent = '';
+    decryptResultDialog.style.display = 'none';
+    passwordService._setToken('');
+    window.clearSecretFactors();
+};
+window.addEventListener('pagehide', window.clearCryptoSession);
+window.resumeCryptoSession = () => { if (!cryptoWorker) initializeWorker(); };
+window.addEventListener('pageshow', event => {
+    if (event.persisted) {
+        window.clearCryptoSession();
+        initializeWorker();
+    }
 });
 
 // Initialize React Component (single shared chessboard)

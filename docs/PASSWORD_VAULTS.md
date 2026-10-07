@@ -46,7 +46,7 @@ WebEncryptor 保留 `passwords.json` 的 `{nextId, entries}` 外层结构。旧�
 
 每个账号从库密钥派生独立的 32 字节密钥：HKDF-SHA256，32 字节全零盐，info 是 UTF-8 JSON 数组 `["WebEncryptor:vault:item:v1",vaultId,itemId]`。同一数组同时用作账号加密的 AAD。每次账号修改生成新的随机 24 字节 nonce，使用 XChaCha20-Poly1305，加密 JSON 账号对象及认证标签。
 
-库及条目标识参与派生和认证，调换标识或跨库移动密文会解密失败。正常修改解锁凭据只重新保护原库密钥，账号密文保持不变。本版本没有库密钥轮换功能。
+库及条目标识参与派生和认证，调换标识或跨库移动密文会解密失败。修改解锁凭据时生成新的随机库密钥，并在 Worker 内重新加密全部账号；新密钥封装和新账号密文作为一个版本原子保存。旧备份和旧凭据仍能解密旧备份本身，但不能解密这次轮换后的条目。升级后需要执行一次修改解锁凭据，现有库才会轮换。
 
 独立 Worker 持有当前库密钥，消息只返回密文或操作所需的账号明文，绝不返回原始库密钥。锁定、离开页面和 5 分钟无操作时终止 Worker、取消待处理请求并清理账号列表与表单。JS 字符串及浏览器管理的内存无法保证物理清零；不将库密钥、主口令或账号明文写入 localStorage。
 
@@ -61,18 +61,3 @@ WebEncryptor 保留 `passwords.json` 的 `{nextId, entries}` 外层结构。旧�
 限制：每库最多 1000 条；账号 JSON 明文最多 64 KiB；库的紧凑 JSON 最多 24 MiB；API 请求最多 32 MiB。版本检查防止正常并发操作丢失更新，不提供恶意服务器回滚或删减完整文件的检测。
 
 加密备份下载为单库的 `{nextId,entries}` JSON。Restore backup 保留密码库及子条目的 UUID，分配新的顶层 ID，原凭据仍然可用。恢复不会覆盖同 UUID 的现有库。已有客户端可以读取旧条目；旧版本程序会拒绝新字段，升级前应备份原文件，不要用旧程序打开新增密码库后的文件。
-
-## 验证
-
-```bash
-go test -race ./...
-node test/worker_smoke.js
-node test/vault_crypto_test.cjs
-node test/vault_client_test.mjs
-node test/password_service_test.mjs
-node test/business_state_test.mjs
-go build -o /tmp/webencryptor-business-server .
-python3 test/browser_flow.py --server /tmp/webencryptor-business-server
-```
-
-真实 Firefox 套件使用临时数据，覆盖旧流程与密码库创建、重画验证、账号加密、搜索、复制调用、并发冲突与草稿保留、锁定、凭据修改、旧密文导入、备份恢复、保存晚到回复和创建响应丢失恢复及手机布局。复制测试注入 Clipboard API 回调，空闲测试触发实际定时器的到期回调，指针操作使用真实 DOM 中的合成事件，不覆盖原生剪贴板权限、真实等待五分钟、触屏硬件和物理内存清除。

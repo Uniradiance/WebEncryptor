@@ -279,9 +279,9 @@ el('vault-change-form').addEventListener('submit', event => {
     let credentials;
     try { credentials = window.getSecretFactors(true); } catch (error) { status(error.message, true); return; }
     run('Saving new unlock settings…', async token => {
-        const password = await client.request('vault_rewrap', { vaultId: current.vaultId, ...credentials });
+        const rotated = await client.request('vault_rewrap', { vaultId: current.vaultId, children: current.children, ...credentials });
         if (epoch !== token) return;
-        if (!await persist({ ...current, password, name: el('vault-change-name').value.trim(), description: el('vault-change-description').value }, token)) return;
+        if (!await persist({ ...current, ...rotated, name: el('vault-change-name').value.trim(), description: el('vault-change-description').value }, token)) return;
         accessMode = null; window.clearSecretFactors(); renderState(); status('Unlock settings saved.');
     });
 });

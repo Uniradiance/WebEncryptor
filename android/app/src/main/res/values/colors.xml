@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the page background (htdocs/index.css body rule) and
+         manifest.json background_color, so the window and the web page agree
+         during startup. -->
+    <color name="window_background">#F4F7F9</color>
+    <color name="brand_primary">#3498DB</color>
+    <color name="brand_primary_dark">#2980B9</color>
+    <color name="ic_launcher_background">#3498DB</color>
+</resources>

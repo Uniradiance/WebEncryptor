@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  API 31+ backup / device-transfer rules. Both cloud backup and device-to-device
+  transfer are refused for the encrypted database, the wrapped data key and the
+  WebView profile (which holds localStorage and IndexedDB leftovers).
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="we" />
+        <exclude domain="sharedpref" path="webencryptor_keys.xml" />
+        <exclude domain="sharedpref" path="webencryptor_state.xml" />
+        <exclude domain="database" path="." />
+        <exclude domain="root" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="we" />
+        <exclude domain="sharedpref" path="webencryptor_keys.xml" />
+        <exclude domain="sharedpref" path="webencryptor_state.xml" />
+        <exclude domain="database" path="." />
+        <exclude domain="root" path="." />
+    </device-transfer>
+</data-extraction-rules>

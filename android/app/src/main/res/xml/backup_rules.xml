@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  API <= 30 backup rules. `android:allowBackup="false"` already disables backup
+  entirely; these rules are a second, explicit statement that the password
+  database, the wrapped data key and the WebView storage are never eligible.
+-->
+<full-backup-content>
+    <exclude domain="file" path="we" />
+    <exclude domain="sharedpref" path="webencryptor_keys.xml" />
+    <exclude domain="sharedpref" path="webencryptor_state.xml" />
+    <exclude domain="database" path="." />
+</full-backup-content>

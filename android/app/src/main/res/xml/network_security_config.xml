@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app holds no network permission at all, so this configuration only states
+  the intent: no cleartext traffic, no user-installed CA, no debug trust anchors
+  in a release build. Everything the WebView loads comes from APK assets through
+  WebViewAssetLoader, which never opens a socket.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

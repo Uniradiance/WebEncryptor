@@ -81,7 +81,7 @@
                     <select id="vault-select"><option value="">Choose a vault</option></select>
                     <button type="button" class="vault-button" id="vault-refresh">Refresh</button>
                     <button type="button" class="vault-button" id="vault-restore">Restore backup</button>
-                    <input type="file" id="vault-restore-file" accept=".json,application/json" hidden aria-label="Encrypted vault backup">
+                    <input type="file" id="vault-restore-file" accept=".json,application/json" hidden aria-label="Encrypted vault backup" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off">
                 </div>
                 <p id="vault-status" class="workspace-hint" role="status" aria-live="polite"></p>
                 <div id="vault-welcome" class="vault-empty">
@@ -92,11 +92,11 @@
                     <button type="button" class="pm-button" id="vault-welcome-create">Create your first vault <span aria-hidden="true">↗</span></button>
                     <p class="empty-footnote">Already have a backup? Use Restore backup above.</p>
                 </div>
-                <form id="vault-access" hidden>
+                <form id="vault-access" hidden autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off">
                     <h3 id="vault-access-title">Unlock vault</h3>
                     <div id="vault-create-fields" class="vault-form-grid" hidden>
-                        <label>Vault name<input id="vault-name" maxlength="256" autocomplete="off"></label>
-                        <label>Description<input id="vault-description" maxlength="1000" autocomplete="off"></label>
+                        <label>Vault name<input id="vault-name" maxlength="256" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></label>
+                        <label>Description<input id="vault-description" maxlength="1000" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></label>
                     </div>
                     <p id="vault-access-hint" class="workspace-hint"></p>
                     <div id="vault-access-factors"></div>
@@ -116,7 +116,7 @@
                         </div>
                     </div>
                     <div class="vault-toolbar">
-                        <label class="vault-search">Search accounts<input type="search" id="vault-search" placeholder="Name, username or website" autocomplete="off"></label>
+                        <label class="vault-search">Search accounts<input type="search" id="vault-search" placeholder="Name, username or website" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></label>
                         <div class="vault-actions">
                             <button type="button" class="vault-button" id="vault-import">Import independent item</button>
                             <button type="button" class="pm-button" id="vault-add">＋ Add account</button>
@@ -125,15 +125,15 @@
                     <p class="workspace-hint">Locks after 5 minutes of inactivity. Account details are encrypted together.</p>
                     <div id="vault-accounts" class="vault-accounts"></div>
                 </div>
-                <form id="vault-editor" hidden>
+                <form id="vault-editor" hidden autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off">
                     <h3 id="vault-editor-title">Add account</h3>
                     <div class="vault-form-grid">
-                        <label>Name<input id="account-name" required maxlength="1024" autocomplete="off"></label>
-                        <label>Website<input id="account-url" maxlength="4096" autocomplete="off" placeholder="https://example.com"></label>
-                        <label>Username<input id="account-username" maxlength="4096" autocomplete="off"></label>
-                        <label>Password<span class="vault-password-field"><input type="password" id="account-password" maxlength="16384" autocomplete="new-password"><button type="button" id="account-reveal" class="vault-button" aria-pressed="false">Show</button></span></label>
+                        <label>Name<input id="account-name" required maxlength="1024" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></label>
+                        <label>Website<input id="account-url" maxlength="4096" placeholder="https://example.com" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></label>
+                        <label>Username<input id="account-username" maxlength="4096" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></label>
+                        <label>Password<span class="vault-password-field"><input type="password" id="account-password" maxlength="16384" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"><button type="button" id="account-reveal" class="vault-button" aria-pressed="false">Show</button></span></label>
                     </div>
-                    <label>Notes<textarea id="account-notes" rows="3" maxlength="30000"></textarea></label>
+                    <label>Notes<textarea id="account-notes" rows="3" maxlength="30000" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></textarea></label>
                     <div class="vault-actions">
                         <button type="submit" class="pm-button" id="account-save">Save account</button>
                         <button type="button" class="vault-button" id="account-generate">Generate password</button>
@@ -141,17 +141,17 @@
                         <button type="button" class="vault-button" id="account-cancel">Cancel</button>
                     </div>
                 </form>
-                <form id="vault-import-form" hidden>
+                <form id="vault-import-form" hidden autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off">
                     <h3>Import independent ciphertext</h3>
                     <p class="workspace-hint">Enter the item's original password, pattern and grid below. The original item is retained.</p>
                     <label>Independent item<select id="vault-import-select"></select></label>
                     <div id="vault-import-factors"></div>
                     <div class="vault-actions"><button type="submit" class="pm-button">Decrypt and import</button><button type="button" class="vault-button" id="vault-import-cancel">Cancel</button></div>
                 </form>
-                <form id="vault-change-form" hidden>
+                <form id="vault-change-form" hidden autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off">
                     <h3>Change vault unlock</h3>
                     <p class="workspace-hint">Set the new password, pattern and grid below. Redraw the pattern to verify it. Your account passwords stay the same.</p>
-                    <div class="vault-form-grid"><label>Vault name<input id="vault-change-name" required maxlength="256"></label><label>Description<input id="vault-change-description" maxlength="1000"></label></div>
+                    <div class="vault-form-grid"><label>Vault name<input id="vault-change-name" required maxlength="256" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></label><label>Description<input id="vault-change-description" maxlength="1000" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></label></div>
                     <div id="vault-change-factors"></div>
                     <div class="vault-actions"><button type="submit" class="pm-button">Save unlock settings</button><button type="button" class="vault-button" id="vault-change-cancel">Cancel</button><button type="button" class="vault-button danger" id="vault-delete">Delete vault and accounts</button></div>
                 </form>
@@ -190,7 +190,7 @@
                             <button type="button" id="showGeneratePasswordModalButton" class="link-style-button" title="Generate a secure password">Generate password</button>
                         </div>
                         <div class="input-pane-body" style="position: relative;"> <!-- Wrapper for textarea and paste button -->
-                            <textarea id="plaintext" placeholder="Type or paste the text you want to protect…" rows="5" aria-label="Data to encrypt"></textarea>
+                            <textarea id="plaintext" placeholder="Type or paste the text you want to protect…" rows="5" aria-label="Data to encrypt" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></textarea>
                             <button id="pastePlaintextButton" title="Paste" aria-label="Paste into Data to Encrypt"
                                 style="position: absolute; bottom: 8px; right: 8px; background-color: transparent; border: none; padding: 0.375rem; cursor: pointer; color: #4B5563; border-radius: 0.25rem; line-height: 0; z-index: 5;">
                                 <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20"
@@ -208,7 +208,7 @@
                             <label for="ciphertextInput">Ciphertext (Base64):</label>
                         </div>
                         <div class="input-pane-body" style="position: relative;"> <!-- Wrapper for textarea and paste button -->
-                            <textarea id="ciphertextInput" rows="5" aria-label="Ciphertext in Base64 to decrypt"></textarea>
+                            <textarea id="ciphertextInput" rows="5" aria-label="Ciphertext in Base64 to decrypt" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></textarea>
                             <button id="pasteCiphertextButton" title="Paste" aria-label="Paste into Ciphertext to Decrypt"
                                 style="position: absolute; bottom: 8px; right: 8px; background-color: transparent; border: none; padding: 0.375rem; cursor: pointer; color: #4B5563; border-radius: 0.25rem; line-height: 0; z-index: 5;">
                                 <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20"
@@ -284,7 +284,7 @@
                     <div class="factor-header">
                         <h3 id="passwordFactorLabel"><span class="factor-number">01</span> Password</h3>
                         <div class="password-body">
-                            <input type="password" id="passwordEncrypt" placeholder="Enter your secret password" aria-labelledby="passwordFactorLabel" autocomplete="off">
+                            <input type="password" id="passwordEncrypt" placeholder="Enter your secret password" aria-labelledby="passwordFactorLabel" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off">
                         </div>
                     </div>
                 </div>
@@ -367,15 +367,15 @@
                 <div class="edit-mode">
                     <div class="pm-form-group">
                         <label for="edit-name">Name</label>
-                        <input type="text" data-name-input id="edit-name">
+                        <input type="text" data-name-input id="edit-name" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off">
                     </div>
                     <div class="pm-form-group">
                         <label for="edit-desc">Description</label>
-                        <textarea data-description-input id="edit-desc"></textarea>
+                        <textarea data-description-input id="edit-desc" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></textarea>
                     </div>
                     <div class="pm-form-group">
                         <label for="edit-pass">Password (Base64)</label>
-                        <input type="text" data-password-input id="edit-pass">
+                        <input type="text" data-password-input id="edit-pass" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off">
                     </div>
                 </div>
             </div>

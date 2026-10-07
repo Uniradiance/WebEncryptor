@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The web frontend declares `color-scheme: light` and ships no dark palette,
+      so the port stays light and turns WebView algorithmic darkening off in code
+      (WebSettingsCompat.setAlgorithmicDarkeningAllowed) rather than letting the
+      platform re-tint an interface it does not own.
+
+      targetSdk 35 means the activity is edge-to-edge on Android 15+: the window
+      is drawn behind the system bars and MainActivity applies the system-bar,
+      cutout and IME insets as padding on the WebView. That keeps the web layout
+      byte-identical while still respecting notches and the soft keyboard.
+    -->
+    <style name="Theme.WebEncryptor" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorPrimaryDark">@color/brand_primary_dark</item>
+        <item name="colorAccent">@color/brand_primary</item>
+    </style>
+</resources>

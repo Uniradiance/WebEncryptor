@@ -1,6 +1,8 @@
 # WebEncryptor — Password Vaults and Text Encryption
 
-**三因子密钥派生 + 单层 AEAD**：主口令、棋盘路径、手绘图案链码三个因子拼入 KDF 盐，经 **Argon2id**（内存困难型 KDF，3 轮 / 256 MiB）派生主密钥，再经 HKDF-SHA256 分离出加密密钥，最后用 **ChaCha20-Poly1305**（单层）加密。安全性取决于三因子组合熵 + Argon2id 的成本，密文可以公开存放。
+**三因子密钥派生 + 单层 AEAD**：棋盘路径、手绘图案链码与随机盐组合成 KDF 盐；主口令经 **Argon2id**（内存困难型 KDF，3 轮 / 256 MiB）派生主密钥，再经 HKDF-SHA256 分离出加密密钥，最后用 **ChaCha20-Poly1305**（单层）加密。安全性取决于三因子组合熵 + Argon2id 的成本，密文可以公开存放。
+
+修改密码库凭据现在同时轮换库密钥并重加密全部账号；已有库需在升级后执行一次修改凭据，才能获得这项保护。离开页面清理敏感会话，新写入拒绝明文密码。旧备份仍可用旧凭据解密，弱凭据仍可能被离线猜中，不能承诺“100% 不可破解”。
 
 ## 部署方式（推荐）：Go 单文件服务器
 
@@ -13,6 +15,10 @@
 ```
 
 **参数**（详见 `server.go`）：`--port`（默认 8443）、`--token`（API 令牌，强烈建议设置）、`--http`（纯 HTTP）、`--dir`（外部静态目录）、`--san/--days/--cn/--org`（证书）、`--no-browser`、`--debug`（写 server.log）。
+
+## Android 独立离线应用
+
+[`android/`](android/README.md) 将同一套 `htdocs/` 前端直接打包进 APK，由 WebView 承载；`server.go` / `vault.go` 的存储与校验通过 Kotlin 和进程内 JS 桥提供。应用没有监听端口，也没有 `INTERNET` 权限。构建：`android/tools/setup-toolchain.sh && android/tools/ci-build.sh assemble`。
 
 ## 当前交互与可靠保存
 
@@ -56,26 +62,6 @@
 - `SignaturePad` 采用**离屏画布缓存已落笔笔画**：逐帧重绘成本从 O(全部笔画点数) 降到 O(当前笔画点数)。
 - 前端完全自托管（React 19 已 vendor 到 `htdocs/vendor/`，无 CDN 依赖，真正离线可用）。
 
-### 测试
-```bash
-node test/recognition_test.mjs     # 稳健性回归 + JS/WASM 精确一致性(parity) + 性能
-node test/business_state_test.mjs # 棋盘撤销、方向编码、任务互斥与过期响应
-node test/password_service_test.mjs # API 超时、取消、重试与容量校验
-node test/worker_smoke.js          # 新密文、错误因子、请求编号与串行 Worker
-go test -race ./...               # CRUD 落盘、失败回滚、损坏库、并发写入
-node test/sigpad_replay_test.mjs   # SignaturePad 状态一致性回归 (提交/撤销/异常注入/引擎防御)
-node test/direction_assist_test.mjs # 八方向软吸附、自由锥区、转弯释放与采样一致性
-cargo test --manifest-path rust/recognition/Cargo.toml   # Rust 侧单元测试
-```
-真实 Firefox 业务流程测试（Python 标准库，临时数据，不使用现有密码库）：
-```bash
-go build -o /tmp/webencryptor-business-server .
-python3 test/browser_flow.py --server /tmp/webencryptor-business-server
-```
-覆盖棋盘实际交互、隐藏、重画不匹配/重试、操作中切换、保存失败、重复提交、落盘、服务器重启和管理器解密。测试以真实 DOM 中的合成鼠标/指针事件运行，不覆盖触屏硬件与原生指针捕获。
-
-浏览器手动稳定性测试：打开 `htdocs/pad-tester.html`，连画 10 次看一致率（先热身 1~2 次）。
-
 ## 密文格式
 `WE2.<盐(16B,base64)>.<IV(12B,base64)>.<密文(base64)>.<MAC(16B,base64)>`，随机盐随密文存储。
 > 图案因子每段编码一个数字：R/RU/U/LU/L/LD/D/RD → 0/1/2/3/4/5/6/7；因此 RU 与 R 后接 U 分别为 `1` 与 `02`。HKDF info 为 `WebEncryptor:enc:v2`，AAD 为 `WebEncryptor:v2`。
@@ -110,18 +96,10 @@ Pipeline (pure-JS reference in `htdocs/signature_recognition.js` + a Rust/WASM c
 
 ### Optimization notes (2026-08)
 - The recognition core is rewritten in **Rust and compiled to WASM** (`rust/recognition` → `htdocs/recognition_wasm.wasm`, built by `./build-wasm.sh`; needs `rustup target add wasm32-unknown-unknown` and `wasm-ld`): per-frame work is only the stroke in progress, latency drops from ~2 ms to sub-millisecond. The JS reference stays as an **exact-parity fallback** (the chain code never depends on WASM load timing).
-- New **spike pruning rule** removes DP corner artifacts (see `docs/REVIEW.md` §4 for measured stability numbers: the residual mismatch rate under realistic jitter σ≤1.5 px is ≤3 per 300 across nine deterministic seeds — the pipeline is at the information limit of this 2-px-resampled chain-code encoder).
-- **Review round (2026-08/09)**: the jitter estimate's O(n log n) full sort became a deterministic O(n) quickselect (identical k-th order statistic, so JS↔WASM parity still holds; extract 0.052→0.047 ms); the `stitch()` zero-displacement direction trap was fixed in both cores; the Go server now serves static assets with strong **ETags + 304 revalidation** (repeat visits transfer 0 bytes instead of ~1.4 MB) and `Cache-Control: no-store` on the API; the deleted test suite was rebuilt with deterministic seeds (`test/recognition_test.mjs`, `test/lib/battery.mjs`) and the crypto smoke test restored (`test/worker_smoke.js`). Full review: `docs/REVIEW.md`.
+- **Spike pruning** removes short reversal artifacts at DP corners.
+- The jitter estimate uses deterministic O(n) quickselect. The Go server serves static assets with strong **ETags + 304 revalidation** and sets `Cache-Control: no-store` on the API.
 - `SignaturePad` caches committed strokes on an **offscreen canvas**: per-frame redraw cost drops from O(all points) to O(current stroke).
 - Frontend fully self-hosted (React 19 vendored in `htdocs/vendor/`, no CDN — truly offline).
-
-### Tests
-```bash
-node test/recognition_test.mjs                     # stability battery + JS/WASM exact parity + perf (seeds: --seeds=1,2,7; parity runs: --runs=1200)
-node test/worker_smoke.js                          # crypto round-trip smoke (zero dependencies; tests shipped sodium.js)
-cargo test --manifest-path rust/recognition/Cargo.toml   # Rust unit tests
-```
-Manual stability: open `htdocs/pad-tester.html`, draw 10+ times and check the consistency rate (warm up 1–2 times first).
 
 ## Ciphertext Format
 `WE2.<salt(16B,base64)>.<IV(12B,base64)>.<ciphertext(base64)>.<MAC(16B,base64)>`.

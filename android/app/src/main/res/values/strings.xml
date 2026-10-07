@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WebEncryptor</string>
+    <string name="webview_upgrade_title">WebView needs an update</string>
+    <string name="webview_upgrade_message">This app renders its interface with the system WebView, which must support import maps and document-start scripts (WebView 89 or newer).\n\nThe installed version is %1$s. Please update "Android System WebView" from the Play Store, then reopen the app.</string>
+    <string name="webview_missing_package">not installed or not visible</string>
+    <string name="exit_title">Close WebEncryptor?</string>
+    <string name="exit_message">The vault is locked and no data is left in memory. Any unsaved draft will be lost.</string>
+    <string name="exit_message_dirty">You have an unsaved account draft. Closing now discards it.</string>
+    <string name="exit_confirm">Close</string>
+    <string name="exit_cancel">Stay</string>
+    <string name="dialog_ok">OK</string>
+    <string name="dialog_cancel">Cancel</string>
+    <string name="render_gone_title">The page stopped responding</string>
+    <string name="render_gone_message">The WebView renderer was closed by the system (this usually means the device ran out of memory while unlocking). Reload the app and try again.</string>
+    <string name="render_gone_reload">Reload</string>
+    <string name="render_gone_close">Close</string>
+    <string name="load_error_title">The interface could not be loaded</string>
+    <string name="load_error_message">The web interface is shipped inside the app, so this normally cannot happen.\n\n%1$s</string>
+    <string name="storage_failure_title">The password database could not be opened</string>
+    <string name="storage_quarantine">Keep the damaged file and start empty</string>
+    <string name="storage_key_failure_message">The app\'s encryption key is not available, so the stored vaults cannot be decrypted.\n\nNothing was deleted: the sealed database is still in\n%1$s\n\nIf you have an exported vault backup you can restore it after starting empty.</string>
+    <string name="save_export_title">Save encrypted vault backup</string>
+    <string name="open_backup_title">Choose an encrypted vault backup</string>
+    <string name="toast_export_saved">Encrypted backup saved.</string>
+    <string name="toast_export_failed">Could not save the backup: %1$s</string>
+    <string name="toast_export_cancelled">Backup export cancelled.</string>
+    <string name="toast_clipboard_cleared">Clipboard cleared.</string>
+    <string name="toast_shutdown_noop">Single-device mode: there is no server to shut down. Use "Close" from the system back gesture to exit.</string>
+    <string name="toast_storage_error">Could not write the password database: %1$s</string>
+</resources>

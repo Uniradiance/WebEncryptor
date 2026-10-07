@@ -136,7 +136,24 @@ async function handleVaultAction(data) {
     } catch (err) { key.fill(0); throw err; }
   }
   if (!activeVaultKey || activeVaultId !== id) throw new Error('Unlock this vault first.');
-  if (data.action === 'vault_rewrap') return wrapVaultKey(activeVaultKey, id, data);
+  if (data.action === 'vault_rewrap') {
+    // Rewrapping the same key lets an old envelope + old credentials decrypt
+    // future items. Rotate the data key and every child as one saved revision.
+    if (!Array.isArray(data.children) || data.children.length > 1000) throw new Error('Invalid vault children.');
+    const key = crypto.getRandomValues(new Uint8Array(32));
+    try {
+      const password = await wrapVaultKey(key, id, data);
+      const seen = new Set(), children = [];
+      for (const child of data.children) {
+        if (seen.has(child.id)) throw new Error('Duplicate vault item identifier.');
+        seen.add(child.id);
+        const item = await decryptVaultAccount(activeVaultKey, id, child);
+        children.push(await encryptVaultAccount(key, id, item.id, item.account));
+      }
+      clearVaultKey(); activeVaultKey = key; activeVaultId = id;
+      return { password, children };
+    } catch (err) { key.fill(0); throw err; }
+  }
   if (data.action === 'vault_encrypt') return encryptVaultAccount(activeVaultKey, id, data.itemId, data.account);
   if (data.action === 'vault_decrypt') return decryptVaultAccount(activeVaultKey, id, data.child);
   if (data.action === 'vault_import') {

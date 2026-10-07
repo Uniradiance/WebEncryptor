@@ -22,3 +22,22 @@ rustup.sh
 rustup-init
 .we-server
 rustc-shim
+
+# Internal review notes and implementation snapshots (local only)
+/docs/*REVIEW*.md
+/docs/*ASSESSMENT*.md
+/docs/PROJECT_OVERVIEW.md
+/docs/USABILITY_CHANGES.md
+/android/docs/
+
+# Local tests, fixtures and manual test pages
+/test/
+/tests/
+*_test.go
+/htdocs/pad-tester.html
+/android/app/src/test/
+/android/app/src/androidTest/
+/android/tools/bridge-test.mjs
+/android/tools/fixtures.mjs
+/android/tools/go-session.mjs
+/android/tools/generate-fixtures.sh

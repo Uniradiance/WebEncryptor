@@ -4,7 +4,6 @@
 // as signature_recognition.js (the pure-JS reference). The JS reference stays
 // as an exact-parity fallback when WebAssembly is unavailable or still
 // loading, so the recognized chain code never depends on load timing:
-// test/recognition_test.mjs enforces JS <-> WASM output equality.
 //
 // The heavy per-stroke core (DP simplification, resampling, corner profile,
 // pruning) runs in Rust; aggregation/messaging and the incremental cache stay

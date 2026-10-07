@@ -70,7 +70,19 @@ const MAX_PLAINTEXT_BYTES = 4 * 1024 * 1024;
 const MAX_CIPHERTEXT_LENGTH = 4 * Math.ceil(MAX_PLAINTEXT_BYTES / 3) + 71;
 
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
+const textDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+// TextEncoder replaces unpaired UTF-16 surrogates with U+FFFD. Reject them
+// so distinct supplied passwords cannot silently become the same UTF-8 key.
+function requireWellFormed(value) {
+  for (let i = 0; i < value.length; i++) {
+    const unit = value.charCodeAt(i);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(++i);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) throw new Error("Invalid Unicode input.");
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) throw new Error("Invalid Unicode input.");
+  }
+}
 
 // --- salt material assembly (length-prefixed to remove ambiguity) ---
 function buildSaltMaterial(rulePhraseStr, pathStr, randomSalt) {
@@ -83,6 +95,7 @@ function buildSaltMaterial(rulePhraseStr, pathStr, randomSalt) {
   view.setUint32(4 + ruleBytes.length, pathBytes.length);
   out.set(pathBytes, 8 + ruleBytes.length);
   out.set(randomSalt, 8 + ruleBytes.length + pathBytes.length);
+  ruleBytes.fill(0); pathBytes.fill(0);
   return out;
 }
 
@@ -91,6 +104,8 @@ async function deriveEncryptionKey(passwordStr, rulePhraseStr, pathStr, randomSa
   const sodium = await sodiumReadyPromise;
   if (!sodium) throw new Error("Sodium.js not initialized.");
 
+  [passwordStr, rulePhraseStr, pathStr].forEach(requireWellFormed);
+  const passwordBytes = textEncoder.encode(passwordStr);
   const saltMaterial = buildSaltMaterial(rulePhraseStr, pathStr, randomSalt);
   // BLAKE2b compresses the material to the 16 bytes Argon2 requires
   const argonSalt = sodium.crypto_generichash(SALT_LENGTH, saltMaterial, null);
@@ -100,17 +115,18 @@ async function deriveEncryptionKey(passwordStr, rulePhraseStr, pathStr, randomSa
   try {
     masterKey = sodium.crypto_pwhash(
       KEY_LENGTH,
-      textEncoder.encode(passwordStr),
+      passwordBytes,
       argonSalt,
-      sodium.crypto_pwhash_OPSLIMIT_MODERATE, // 3 passes
-      sodium.crypto_pwhash_MEMLIMIT_MODERATE, // 256 MiB
+      3, // fixed WE2/WVK1 parameters, independent of library defaults
+      268435456, // 256 MiB
       sodium.crypto_pwhash_ALG_ARGON2ID13,
     );
   } catch (e) {
+    throw new Error("Argon2id key derivation failed.");
+  } finally {
+    passwordBytes.fill(0);
     argonSalt.fill(0);
-    throw new Error(`Argon2id key derivation failed: ${(e && e.message) || e}`);
   }
-  argonSalt.fill(0);
 
   // HKDF for key separation/domain separation.
   let hkdfKey;
@@ -132,51 +148,56 @@ async function encryptString(plaintextStr, passwordStr, rulePhraseStr, pathStr, 
   const sodium = await sodiumReadyPromise;
   if (!sodium) throw new Error("Sodium.js not initialized for encryption.");
 
+  requireWellFormed(plaintextStr);
   const plaintext = textEncoder.encode(plaintextStr);
-  const randomSalt = new Uint8Array(SALT_LENGTH);
-  crypto.getRandomValues(randomSalt);
+  let key;
+  try {
+    const randomSalt = new Uint8Array(SALT_LENGTH);
+    crypto.getRandomValues(randomSalt);
 
-  self.postMessage({
-    status: "progress",
-    action: "encrypt",
-    requestId,
-    currentStep: 1,
-    totalSteps: 2,
-    stepName: "Deriving key (Argon2id)",
-  });
-  const key = await deriveEncryptionKey(passwordStr, rulePhraseStr, pathStr, randomSalt);
+    self.postMessage({
+      status: "progress",
+      action: "encrypt",
+      requestId,
+      currentStep: 1,
+      totalSteps: 2,
+      stepName: "Deriving key (Argon2id)",
+    });
+    key = await deriveEncryptionKey(passwordStr, rulePhraseStr, pathStr, randomSalt);
 
-  self.postMessage({
-    status: "progress",
-    action: "encrypt",
-    requestId,
-    currentStep: 2,
-    totalSteps: 2,
-    stepName: "Encrypting (ChaCha20-Poly1305)",
-  });
-  const iv = new Uint8Array(IV_LENGTH);
-  crypto.getRandomValues(iv);
-  const { ciphertext, mac } = sodium.crypto_aead_chacha20poly1305_ietf_encrypt_detached(
-    plaintext,
-    AAD,
-    null, // nsec unused
-    iv,
-    key,
-  );
+    self.postMessage({
+      status: "progress",
+      action: "encrypt",
+      requestId,
+      currentStep: 2,
+      totalSteps: 2,
+      stepName: "Encrypting (ChaCha20-Poly1305)",
+    });
+    const iv = new Uint8Array(IV_LENGTH);
+    crypto.getRandomValues(iv);
+    const { ciphertext, mac } = sodium.crypto_aead_chacha20poly1305_ietf_encrypt_detached(
+      plaintext,
+      AAD,
+      null, // nsec unused
+      iv,
+      key,
+    );
 
-  const result =
-    FORMAT_PREFIX +
-    uint8ArrayToBase64(randomSalt) +
-    "." +
-    uint8ArrayToBase64(iv) +
-    "." +
-    uint8ArrayToBase64(ciphertext) +
-    "." +
-    uint8ArrayToBase64(mac);
+    const result =
+      FORMAT_PREFIX +
+      uint8ArrayToBase64(randomSalt) +
+      "." +
+      uint8ArrayToBase64(iv) +
+      "." +
+      uint8ArrayToBase64(ciphertext) +
+      "." +
+      uint8ArrayToBase64(mac);
 
-  key.fill(0);
-  iv.fill(0);
-  return result;
+    return result;
+  } finally {
+    key?.fill(0);
+    plaintext.fill(0);
+  }
 }
 
 // --- ciphertext parsing (strict validation) ---
@@ -237,7 +258,8 @@ async function decryptString(ciphertextStr, passwordStr, rulePhraseStr, pathStr,
   } finally {
     key.fill(0);
   }
-  return textDecoder.decode(plaintext);
+  try { return textDecoder.decode(plaintext); }
+  finally { plaintext.fill(0); }
 }
 
 // --- worker message entry ---
@@ -317,6 +339,7 @@ self.onmessage = (e) => {
 function base64ToUint8Array(base64Str) {
   try {
     const binaryString = atob(base64Str);
+    if (btoa(binaryString) !== base64Str) throw new Error("Non-canonical Base64.");
     const len = binaryString.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {

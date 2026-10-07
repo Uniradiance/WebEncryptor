@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Launcher icon: the in-page brand lock mark (htdocs/index.html) redrawn as a
+  vector so the port adds no bitmaps. minSdk 26 means adaptive icons are
+  available on every supported device, so no legacy PNG densities are needed.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

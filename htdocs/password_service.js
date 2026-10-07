@@ -9,24 +9,28 @@
  * This encapsulates all logic for creating, reading, updating, and deleting passwords.
  */
 import { validateVault, vaultBody } from './vault_schema.js';
+import { validateTextCiphertext } from './ciphertext_format.js';
 
 export class PasswordService {
     constructor({ timeoutMs = 30000 } = {}) {
         this.timeoutMs = timeoutMs;
+        this.token = '';
+        // Remove tokens persisted by previous versions; never migrate them
+        // into another persistent store.
+        try { localStorage.removeItem('webencryptor_token'); } catch {}
     }
 
     /**
-     * Server API access token (persisted in localStorage).
+     * Server API access token (current page memory only).
      * Required when the server was started with --token; otherwise the API
      * returns 401.
      */
     _getToken() {
-        return localStorage.getItem('webencryptor_token') || '';
+        return this.token;
     }
 
     _setToken(token) {
-        if (token) localStorage.setItem('webencryptor_token', token.trim());
-        else localStorage.removeItem('webencryptor_token');
+        this.token = token?.trim() || '';
     }
 
     /**
@@ -56,6 +60,7 @@ export class PasswordService {
             result = await Promise.race([deadline, (async () => {
                 const response = await fetch(url, {
                     ...options,
+                    cache: 'no-store',
                     signal: controller.signal,
                     headers: {
                         'Content-Type': 'application/json',
@@ -110,6 +115,7 @@ export class PasswordService {
             }
         }
         const body = JSON.stringify(data);
+        if (Object.hasOwn(data, 'password')) validateTextCiphertext(data.password);
         if (encoder.encode(body).byteLength > 32 * 1024 * 1024) {
             throw new Error('The JSON request exceeds 32 MiB.');
         }
